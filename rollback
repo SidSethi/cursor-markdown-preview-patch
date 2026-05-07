@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+#
+# Rollback script to restore Cursor.app's workbench.html from a patch backup.
+
+set -euo pipefail
+
+readonly BACKUP_ROOT="${CURSOR_WORKBENCH_PATCH_BACKUP_ROOT:-$HOME/Library/Application Support/Cursor/workbench-patch-backups}"
+
+# Print the script's command-line help text.
+print_script_usage() {
+  cat <<'USAGE' >&2
+Usage: rollback [backup-workbench.html]
+
+Restores Cursor.app's workbench.html from a patch backup. With no argument, it
+uses the newest backup under CURSOR_WORKBENCH_PATCH_BACKUP_ROOT.
+
+Environment:
+  CURSOR_WORKBENCH_PATCH_BACKUP_ROOT
+    Directory containing cursor-app-* backup folders.
+USAGE
+}
+
+# Print an error message and stop immediately with failure.
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+# Locate Cursor's workbench.html, with an envvar override for tests.
+find_workbench_html() {
+  local path
+
+  # Test hook: restore this file instead of the real Cursor.app bundle.
+  if [[ -n "${CURSOR_WORKBENCH_HTML:-}" ]]; then
+    [[ -f "$CURSOR_WORKBENCH_HTML" ]] || return 1
+    printf '%s\n' "$CURSOR_WORKBENCH_HTML"
+    return 0
+  fi
+
+  local candidates=(
+    "/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-sandbox/workbench/workbench.html"
+    "$HOME/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-sandbox/workbench/workbench.html"
+    "/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html"
+    "$HOME/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html"
+  )
+
+  for path in "${candidates[@]}"; do
+    if [[ -f "$path" ]]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+# Print the newest backup path under BACKUP_ROOT.
+latest_backup() {
+  local backup
+  backup=$(find "$BACKUP_ROOT" -path '*/cursor-app-*/workbench.html' -type f 2>/dev/null | sort | tail -n 1)
+  [[ -n "$backup" ]] || return 1
+  printf '%s\n' "$backup"
+}
+
+# Coordinate backup selection, workbench restore, and output.
+main() {
+  if [[ $# -gt 1 ]]; then
+    print_script_usage
+    exit 2
+  fi
+
+  local workbench_html backup_path
+  workbench_html=$(find_workbench_html) ||
+    die "Cursor workbench.html not found in known locations"
+
+  if [[ $# -eq 1 ]]; then
+    backup_path="$1"
+  else
+    backup_path=$(latest_backup) ||
+      die "no backups found under $BACKUP_ROOT"
+  fi
+
+  [[ -f "$backup_path" ]] || die "backup not found: $backup_path"
+
+  cp -p "$backup_path" "$workbench_html"
+
+  cat <<EOF
+OK: Cursor workbench restored from backup.
+
+Workbench:
+  $workbench_html
+
+Restored backup:
+  $backup_path
+
+Next:
+  Run "Developer: Reload Window" in Cursor, or restart Cursor.
+EOF
+}
+
+main "$@"

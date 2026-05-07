@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+#
+# Patch script to apply custom CSS to Cursor's editable rendered Markdown preview
+#
+# Works by injecting Cursor.app's workbench.html with managed CSS block
+#
+# The broader mechanism can inject CSS and JavaScript, but hasn't been tested
+
+set -euo pipefail
+
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly CSS_TEMPLATE="$SCRIPT_DIR/custom.css"
+readonly CURSOR_SETTINGS="$HOME/Library/Application Support/Cursor/User/settings.json"
+readonly BACKUP_ROOT="${CURSOR_WORKBENCH_PATCH_BACKUP_ROOT:-$HOME/Library/Application Support/Cursor/workbench-patch-backups}"
+readonly DEFAULT_EDITOR_FONT_SIZE="13"
+readonly CSS_FONT_SIZE_PROPERTY="--cursor-inline-markdown-editor-font-size"
+
+readonly START_MARKER="<!-- !! VSCODE-CUSTOM-CSS-START !! -->"
+readonly END_MARKER="<!-- !! VSCODE-CUSTOM-CSS-END !! -->"
+readonly SESSION_MARKER_PREFIX="<!-- !! VSCODE-CUSTOM-CSS-SESSION-ID"
+
+PATCH_TMP_DIR=""
+
+# Print the script's command-line help text.
+print_script_usage() {
+  cat <<'USAGE' >&2
+Usage: patch
+
+Patches Cursor.app's workbench.html with custom.css from the
+same directory as this script. Re-run after Cursor updates overwrite the app
+bundle.
+
+Environment:
+  CURSOR_WORKBENCH_PATCH_BACKUP_ROOT
+    Directory where timestamped workbench backups are written.
+USAGE
+}
+
+# Print an error message and stop immediately with failure.
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+# Return success when the input is an integer or decimal number.
+is_number() {
+  [[ "${1:-}" =~ ^[0-9]+([.][0-9]+)?$ ]]
+}
+
+# Locate Cursor's workbench.html, with an envvar override for tests.
+find_workbench_html() {
+  local path
+
+  # Test hook: patch this file instead of the real Cursor.app bundle.
+  if [[ -n "${CURSOR_WORKBENCH_HTML:-}" ]]; then
+    [[ -f "$CURSOR_WORKBENCH_HTML" ]] || return 1
+    printf '%s\n' "$CURSOR_WORKBENCH_HTML"
+    return 0
+  fi
+
+  local candidates=(
+    "/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-sandbox/workbench/workbench.html"
+    "$HOME/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-sandbox/workbench/workbench.html"
+    "/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html"
+    "$HOME/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html"
+  )
+
+  for path in "${candidates[@]}"; do
+    if [[ -f "$path" ]]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+# Read Cursor's editor.fontSize setting, falling back to DEFAULT_EDITOR_FONT_SIZE.
+read_editor_font_size() {
+  local value
+
+  if [[ ! -f "$CURSOR_SETTINGS" ]]; then
+    printf '%s\n' "$DEFAULT_EDITOR_FONT_SIZE"
+    return
+  fi
+
+  if command -v jq >/dev/null 2>&1; then
+    value=$(jq -r '."editor.fontSize" // empty' "$CURSOR_SETTINGS" 2>/dev/null || true)
+    if is_number "$value"; then
+      printf '%s\n' "$value"
+      return
+    fi
+  fi
+
+  value=$(
+    sed -nE 's/^[[:space:]]*"editor\.fontSize"[[:space:]]*:[[:space:]]*([0-9]+([.][0-9]+)?).*/\1/p' "$CURSOR_SETTINGS" |
+      head -n 1
+  )
+
+  if is_number "$value"; then
+    printf '%s\n' "$value"
+  else
+    printf '%s\n' "$DEFAULT_EDITOR_FONT_SIZE"
+  fi
+}
+
+# Render the source CSS to stdout with the current editor font size substituted,
+# without modifying custom.css itself.
+render_css() {
+  local font_size_px="$1"
+
+  [[ -f "$CSS_TEMPLATE" ]] || die "CSS file not found: $CSS_TEMPLATE"
+
+  PATCH_FONT_SIZE_PX="$font_size_px" \
+    PATCH_CSS_FONT_SIZE_PROPERTY="$CSS_FONT_SIZE_PROPERTY" \
+    perl -pe '
+      BEGIN {
+        $property = quotemeta($ENV{"PATCH_CSS_FONT_SIZE_PROPERTY"});
+        $font_size = $ENV{"PATCH_FONT_SIZE_PX"};
+      }
+      s/^(\s*$property\s*:\s*)[^;]+(;.*)$/${1}${font_size}${2}/;
+    ' "$CSS_TEMPLATE"
+}
+
+# Strip any previously injected managed block so reruns stay idempotent.
+remove_existing_patch() {
+  local source_html="$1"
+  local cleaned_html="$2"
+
+  perl -0pe '
+    s/\n?<!-- !! VSCODE-CUSTOM-CSS-START !! -->.*?<!-- !! VSCODE-CUSTOM-CSS-END !! -->\n?/\n/gs;
+    s/\n?<!-- !! VSCODE-CUSTOM-CSS-SESSION-ID:?\s*[^>]* -->\n?/\n/g;
+  ' "$source_html" > "$cleaned_html"
+}
+
+# Build the HTML block that will be injected into workbench.html.
+build_injection_block() {
+  local session_id="$1"
+  local rendered_css="$2"
+  local block_html="$3"
+
+  {
+    printf '%s %s !! -->\n' "$SESSION_MARKER_PREFIX" "$session_id"
+    printf '%s\n' "$START_MARKER"
+    printf '<style>\n'
+    cat "$rendered_css"
+    printf '\n</style>\n'
+    printf '%s\n' "$END_MARKER"
+  } > "$block_html"
+}
+
+# Insert the generated block immediately before workbench.html's closing tag.
+insert_block_before_closing_html() {
+  local cleaned_html="$1"
+  local block_html="$2"
+  local patched_html="$3"
+
+  awk -v block_file="$block_html" '
+    /<\/html>/ && inserted == 0 {
+      while ((getline line < block_file) > 0) {
+        print line
+      }
+      close(block_file)
+      inserted = 1
+    }
+    { print }
+    END {
+      if (inserted != 1) {
+        exit 2
+      }
+    }
+  ' "$cleaned_html" > "$patched_html"
+}
+
+# Confirm the patched workbench contains the expected managed markers and CSS.
+verify_patch() {
+  local workbench_html="$1"
+
+  grep -qF "$START_MARKER" "$workbench_html" &&
+    grep -qF "$END_MARKER" "$workbench_html" &&
+    grep -qF -- "$CSS_FONT_SIZE_PROPERTY" "$workbench_html"
+}
+
+main() {
+  if [[ $# -gt 0 ]]; then
+    print_script_usage
+    exit 2
+  fi
+
+  local workbench_html
+  workbench_html=$(find_workbench_html) ||
+    die "Cursor workbench.html not found in known locations"
+
+  local editor_font_size font_size_px session_id
+  editor_font_size="$(read_editor_font_size)"
+  font_size_px="${editor_font_size}px"
+  session_id="$(date '+%Y%m%d-%H%M%S')"
+
+  local backup_dir backup_path
+  backup_dir="$BACKUP_ROOT/cursor-app-$session_id"
+  backup_path="$backup_dir/workbench.html"
+
+  local tmp_dir
+  # mktemp -d creates a new empty temporary directory and prints its path.
+  tmp_dir="$(mktemp -d)"
+  PATCH_TMP_DIR="$tmp_dir"
+  # Every run gets a fresh temp directory. It holds the rendered CSS and patched
+  # workbench candidate, then is deleted automatically when the script exits.
+  # trap registers cleanup code that runs when the script exits for any reason.
+  trap '[[ -n "${PATCH_TMP_DIR:-}" ]] && rm -rf "$PATCH_TMP_DIR"' EXIT
+
+  local cleaned_html rendered_css block_html patched_html
+  cleaned_html="$tmp_dir/workbench.cleaned.html"
+  rendered_css="$tmp_dir/custom.css"
+  block_html="$tmp_dir/custom-css-block.html"
+  patched_html="$tmp_dir/workbench.patched.html"
+
+  mkdir -p "$backup_dir"
+  cp -p "$workbench_html" "$backup_path"
+
+  render_css "$font_size_px" > "$rendered_css"
+  remove_existing_patch "$workbench_html" "$cleaned_html"
+  build_injection_block "$session_id" "$rendered_css" "$block_html"
+
+  insert_block_before_closing_html "$cleaned_html" "$block_html" "$patched_html" || {
+    echo "backup retained at: $backup_path" >&2
+    die "</html> not found in $workbench_html"
+  }
+
+  cp "$patched_html" "$workbench_html"
+
+  if ! verify_patch "$workbench_html"; then
+    cp -p "$backup_path" "$workbench_html"
+    die "marker verification failed; restored backup"
+  fi
+
+  cat <<EOF
+OK: Cursor workbench CSS injection applied.
+
+Workbench:
+  $workbench_html
+
+Rendered CSS:
+  editor.fontSize -> $font_size_px
+  source -> $CSS_TEMPLATE
+
+Backup:
+  $backup_path
+
+Next:
+  Run "Developer: Reload Window" in Cursor, or restart Cursor.
+
+Rollback:
+  ./rollback
+  # or restore this exact backup:
+  ./rollback '$backup_path'
+EOF
+}
+
+main "$@"

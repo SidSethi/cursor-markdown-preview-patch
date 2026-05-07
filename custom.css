@@ -1,0 +1,27 @@
+/* Cursor editable rendered Markdown preview typography.
+
+   Keep this file valid CSS. Cursor opens and validates CSS files directly, so
+   non-CSS template tokens create editor errors.
+*/
+
+.markdown-editor-react__richtext-content {
+  /*
+     Fallback only. ./patch injects Cursor's current editor.fontSize into the
+     workbench copy, while leaving this source file as valid CSS.
+  */
+  --cursor-inline-markdown-editor-font-size: 13px;
+
+  font-size: var(--cursor-inline-markdown-editor-font-size) !important;
+  max-width: 760px !important;
+}
+
+/*
+   Cursor assigns its own sizes to some rich Markdown elements. Inheriting here
+   keeps body text aligned with the editor font size injected above.
+*/
+.markdown-editor-react__richtext-content p,
+.markdown-editor-react__richtext-content li,
+.markdown-editor-react__richtext-content td,
+.markdown-editor-react__richtext-content th {
+  font-size: inherit !important;
+}
