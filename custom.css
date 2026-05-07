@@ -9,7 +9,7 @@
      Fallback only. ./patch injects Cursor's current editor.fontSize into the
      workbench copy, while leaving this source file as valid CSS.
   */
-  --cursor-inline-markdown-editor-font-size: 13px;
+  --cursor-inline-markdown-editor-font-size: 14px;
 
   font-size: var(--cursor-inline-markdown-editor-font-size) !important;
   max-width: 760px !important;

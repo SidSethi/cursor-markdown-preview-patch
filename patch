@@ -24,11 +24,20 @@ PATCH_TMP_DIR=""
 # Print the script's command-line help text.
 print_script_usage() {
   cat <<'USAGE' >&2
-Usage: patch
+Usage: patch [--font-size editor|css|NUMBER]
 
 Patches Cursor.app's workbench.html with custom.css from the
 same directory as this script. Re-run after Cursor updates overwrite the app
 bundle.
+
+Options:
+  --font-size editor
+    Read Cursor's editor.fontSize setting and inject that px value. This is the
+    default.
+  --font-size css
+    Use the font-size variable exactly as written in custom.css.
+  --font-size NUMBER
+    Inject NUMBER as px, for example --font-size 18.
 
 Environment:
   CURSOR_WORKBENCH_PATCH_BACKUP_ROOT
@@ -45,6 +54,35 @@ die() {
 # Return success when the input is an integer or decimal number.
 is_number() {
   [[ "${1:-}" =~ ^[0-9]+([.][0-9]+)?$ ]]
+}
+
+# Parse command-line options and print the selected font-size mode.
+parse_font_size_mode() {
+  local mode="editor"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --font-size)
+        [[ $# -ge 2 ]] || die "--font-size requires editor, css, or NUMBER"
+        mode="$2"
+        shift 2
+        ;;
+      -h|--help)
+        print_script_usage
+        exit 0
+        ;;
+      *)
+        print_script_usage
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ "$mode" == "editor" || "$mode" == "css" ]] || is_number "$mode"; then
+    printf '%s\n' "$mode"
+  else
+    die "invalid --font-size value: $mode"
+  fi
 }
 
 # Locate Cursor's workbench.html, with an envvar override for tests.
@@ -104,12 +142,17 @@ read_editor_font_size() {
   fi
 }
 
-# Render the source CSS to stdout with the current editor font size substituted,
-# without modifying custom.css itself.
+# Render the source CSS to stdout, optionally substituting the font-size
+# variable without modifying custom.css itself.
 render_css() {
   local font_size_px="$1"
 
   [[ -f "$CSS_TEMPLATE" ]] || die "CSS file not found: $CSS_TEMPLATE"
+
+  if [[ "$font_size_px" == "css" ]]; then
+    cat "$CSS_TEMPLATE"
+    return
+  fi
 
   PATCH_FONT_SIZE_PX="$font_size_px" \
     PATCH_CSS_FONT_SIZE_PROPERTY="$CSS_FONT_SIZE_PROPERTY" \
@@ -182,18 +225,24 @@ verify_patch() {
 }
 
 main() {
-  if [[ $# -gt 0 ]]; then
-    print_script_usage
-    exit 2
-  fi
+  local font_size_mode
+  font_size_mode="$(parse_font_size_mode "$@")"
 
   local workbench_html
   workbench_html=$(find_workbench_html) ||
     die "Cursor workbench.html not found in known locations"
 
-  local editor_font_size font_size_px session_id
-  editor_font_size="$(read_editor_font_size)"
-  font_size_px="${editor_font_size}px"
+  local font_size_label font_size_px session_id
+  if [[ "$font_size_mode" == "editor" ]]; then
+    font_size_px="$(read_editor_font_size)px"
+    font_size_label="editor.fontSize -> $font_size_px"
+  elif [[ "$font_size_mode" == "css" ]]; then
+    font_size_px="css"
+    font_size_label="custom.css"
+  else
+    font_size_px="${font_size_mode}px"
+    font_size_label="--font-size -> $font_size_px"
+  fi
   session_id="$(date '+%Y%m%d-%H%M%S')"
 
   local backup_dir backup_path
@@ -241,7 +290,7 @@ Workbench:
   $workbench_html
 
 Rendered CSS:
-  editor.fontSize -> $font_size_px
+  font size -> $font_size_label
   source -> $CSS_TEMPLATE
 
 Backup:

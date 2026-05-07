@@ -1,6 +1,6 @@
 # Custom CSS for Cursor's editable rendered Markdown preview
 
-Cursor's native editable rendered Markdown preview does not currently allow custom styling. This gist is a small unsupported workaround: it patches Cursor's installed app bundle and injects custom CSS into `workbench.html`.
+Cursor's native editable rendered Markdown preview does not currently allow custom styling. This repo is a small unsupported workaround: it patches Cursor's installed app bundle and injects custom CSS into `workbench.html`.
 
 It targets Cursor's private `.markdown-editor-react__richtext-content` DOM, which is used by the native `Preview | Markdown` editor surface.
 
@@ -25,6 +25,14 @@ To see changes, reload Cursor with `Developer: Reload Window` or restart Cursor.
 
 By default, the script sets the preview base font size to match Cursor's current `editor.fontSize`. Edit `custom.css` for styling changes, then re-run `./patch` and reload Cursor.
 
+You can choose how the font-size variable is rendered:
+
+```bash
+./patch --font-size editor # default: use Cursor editor.fontSize
+./patch --font-size css    # use the value already written in custom.css
+./patch --font-size 18     # inject 18px
+```
+
 To restore the previous backed-up workbench:
 
 ```bash
@@ -42,6 +50,8 @@ To restore the previous backed-up workbench:
   - Can also restore a specific `workbench.html` backup path.
 - `custom.css`
   - CSS source for Cursor's editable rendered Markdown preview.
+- `test.sh`
+  - Fixture smoke tests for the patch and rollback scripts.
 
 ## Caveats
 
@@ -66,19 +76,19 @@ The script inserts a managed block before `</html>` in Cursor's workbench file:
 
 The script removes any previous managed block before writing a new one, so it is safe to rerun after editing the CSS or after Cursor updates.
 
-`custom.css` stays valid CSS. Instead of using invalid template tokens, `patch` rewrites this custom property in the temporary injected copy:
+`custom.css` stays valid CSS. Instead of using invalid template tokens, `patch` can rewrite this custom property in the temporary injected copy:
 
 ```css
 --cursor-inline-markdown-editor-font-size: 13px;
 ```
 
-The `13px` value in `custom.css` is only a fallback that keeps the CSS understandable and valid. The real injected value is read from Cursor's user setting:
+The value in `custom.css` is used directly when running `./patch --font-size css`. Otherwise, the injected value is read from Cursor's user setting or from an explicit numeric `--font-size` value:
 
 ```json
 "editor.fontSize": 13
 ```
 
-This is a snapshot at patch time. It does not live-update if you later change `editor.fontSize`. Rerun `./patch` and reload Cursor.
+This is a snapshot at patch time. It does not live-update if you later change `editor.fontSize` or `custom.css`. Rerun `./patch` and reload Cursor.
 
 ## Rollback and backups
 
