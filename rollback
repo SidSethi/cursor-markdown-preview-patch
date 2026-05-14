@@ -5,6 +5,7 @@
 set -euo pipefail
 
 readonly BACKUP_ROOT="${CURSOR_WORKBENCH_PATCH_BACKUP_ROOT:-$HOME/Library/Application Support/Cursor/workbench-patch-backups}"
+readonly JS_OUTPUT_NAME="cursor-markdown-preview-patch.js"
 
 # Print the script's command-line help text.
 print_script_usage() {
@@ -12,7 +13,8 @@ print_script_usage() {
 Usage: rollback [backup-workbench.html]
 
 Restores Cursor.app's workbench.html from a patch backup. With no argument, it
-uses the newest backup under CURSOR_WORKBENCH_PATCH_BACKUP_ROOT.
+uses the newest clean backup under CURSOR_WORKBENCH_PATCH_BACKUP_ROOT. Passing
+an explicit backup path restores that exact file.
 
 Environment:
   CURSOR_WORKBENCH_PATCH_BACKUP_ROOT
@@ -54,12 +56,25 @@ find_workbench_html() {
   return 1
 }
 
-# Print the newest backup path under BACKUP_ROOT.
-latest_backup() {
+# Return success when a workbench backup does not contain this managed patch.
+is_clean_backup() {
+  local backup_path="$1"
+
+  ! grep -qF "$JS_OUTPUT_NAME" "$backup_path" &&
+    ! grep -qF "VSCODE-CUSTOM-CSS-START" "$backup_path"
+}
+
+# Print the newest clean backup path under BACKUP_ROOT.
+latest_clean_backup() {
   local backup
-  backup=$(find "$BACKUP_ROOT" -path '*/cursor-app-*/workbench.html' -type f 2>/dev/null | sort | tail -n 1)
-  [[ -n "$backup" ]] || return 1
-  printf '%s\n' "$backup"
+  while IFS= read -r backup; do
+    if is_clean_backup "$backup"; then
+      printf '%s\n' "$backup"
+      return 0
+    fi
+  done < <(find "$BACKUP_ROOT" -path '*/cursor-app-*/workbench.html' -type f 2>/dev/null | sort -r)
+
+  return 1
 }
 
 # Coordinate backup selection, workbench restore, and output.
@@ -76,13 +91,17 @@ main() {
   if [[ $# -eq 1 ]]; then
     backup_path="$1"
   else
-    backup_path=$(latest_backup) ||
-      die "no backups found under $BACKUP_ROOT"
+    backup_path=$(latest_clean_backup) ||
+      die "no clean backups found under $BACKUP_ROOT"
   fi
 
   [[ -f "$backup_path" ]] || die "backup not found: $backup_path"
 
   cp -p "$backup_path" "$workbench_html"
+
+  if ! grep -qF "$JS_OUTPUT_NAME" "$workbench_html"; then
+    rm -f "$(dirname "$workbench_html")/$JS_OUTPUT_NAME"
+  fi
 
   cat <<EOF
 OK: Cursor workbench restored from backup.

@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 #
-# Patch script to apply custom CSS to Cursor's editable rendered Markdown preview
+# Patch script to apply custom CSS/JS to Cursor's editable rendered Markdown preview
 #
-# Works by injecting Cursor.app's workbench.html with managed CSS block
-#
-# The broader mechanism can inject CSS and JavaScript, but hasn't been tested
+# Works by injecting Cursor.app's workbench.html with a managed block
 
 set -euo pipefail
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly CSS_TEMPLATE="$SCRIPT_DIR/custom.css"
+readonly JS_TEMPLATE="$SCRIPT_DIR/custom.js"
+readonly JS_OUTPUT_NAME="cursor-markdown-preview-patch.js"
 readonly CURSOR_SETTINGS="$HOME/Library/Application Support/Cursor/User/settings.json"
 readonly BACKUP_ROOT="${CURSOR_WORKBENCH_PATCH_BACKUP_ROOT:-$HOME/Library/Application Support/Cursor/workbench-patch-backups}"
 readonly DEFAULT_EDITOR_FONT_SIZE="13"
 readonly CSS_FONT_SIZE_PROPERTY="--cursor-inline-markdown-editor-font-size"
+readonly JS_VERIFY_TOKEN="cursorMarkdownPreviewFrontmatter"
 
 readonly START_MARKER="<!-- !! VSCODE-CUSTOM-CSS-START !! -->"
 readonly END_MARKER="<!-- !! VSCODE-CUSTOM-CSS-END !! -->"
@@ -26,8 +27,8 @@ print_script_usage() {
   cat <<'USAGE' >&2
 Usage: patch [--font-size editor|css|NUMBER]
 
-Patches Cursor.app's workbench.html with custom.css from the
-same directory as this script. Re-run after Cursor updates overwrite the app
+Patches Cursor.app's workbench.html with custom.css and installs custom.js as a
+same-origin workbench asset. Re-run after Cursor updates overwrite the app
 bundle.
 
 Options:
@@ -188,6 +189,7 @@ build_injection_block() {
     printf '<style>\n'
     cat "$rendered_css"
     printf '\n</style>\n'
+    printf '<script src="./%s"></script>\n' "$JS_OUTPUT_NAME"
     printf '%s\n' "$END_MARKER"
   } > "$block_html"
 }
@@ -215,13 +217,33 @@ insert_block_before_closing_html() {
   ' "$cleaned_html" > "$patched_html"
 }
 
-# Confirm the patched workbench contains the expected managed markers and CSS.
+# Confirm the patched workbench contains the expected managed markers and assets.
 verify_patch() {
   local workbench_html="$1"
+  local managed_js="$2"
 
   grep -qF "$START_MARKER" "$workbench_html" &&
     grep -qF "$END_MARKER" "$workbench_html" &&
-    grep -qF -- "$CSS_FONT_SIZE_PROPERTY" "$workbench_html"
+    grep -qF -- "$CSS_FONT_SIZE_PROPERTY" "$workbench_html" &&
+    grep -qF -- "$JS_OUTPUT_NAME" "$workbench_html" &&
+    [[ -f "$managed_js" ]] &&
+    grep -qF -- "$JS_VERIFY_TOKEN" "$managed_js"
+}
+
+# Print a unique backup directory path for this patch run.
+create_backup_dir() {
+  local session_id="$1"
+  local backup_dir="$BACKUP_ROOT/cursor-app-$session_id"
+  local suffix=1
+
+  mkdir -p "$BACKUP_ROOT"
+
+  while ! mkdir "$backup_dir" 2>/dev/null; do
+    backup_dir="$BACKUP_ROOT/cursor-app-$session_id-$suffix"
+    suffix=$((suffix + 1))
+  done
+
+  printf '%s\n' "$backup_dir"
 }
 
 main() {
@@ -231,6 +253,7 @@ main() {
   local workbench_html
   workbench_html=$(find_workbench_html) ||
     die "Cursor workbench.html not found in known locations"
+  [[ -f "$JS_TEMPLATE" ]] || die "JS file not found: $JS_TEMPLATE"
 
   local font_size_label font_size_px session_id
   if [[ "$font_size_mode" == "editor" ]]; then
@@ -246,7 +269,7 @@ main() {
   session_id="$(date '+%Y%m%d-%H%M%S')"
 
   local backup_dir backup_path
-  backup_dir="$BACKUP_ROOT/cursor-app-$session_id"
+  backup_dir="$(create_backup_dir "$session_id")"
   backup_path="$backup_dir/workbench.html"
 
   local tmp_dir
@@ -264,7 +287,6 @@ main() {
   block_html="$tmp_dir/custom-css-block.html"
   patched_html="$tmp_dir/workbench.patched.html"
 
-  mkdir -p "$backup_dir"
   cp -p "$workbench_html" "$backup_path"
 
   render_css "$font_size_px" > "$rendered_css"
@@ -276,15 +298,26 @@ main() {
     die "</html> not found in $workbench_html"
   }
 
-  cp "$patched_html" "$workbench_html"
+  local managed_js
+  managed_js="$(dirname "$workbench_html")/$JS_OUTPUT_NAME"
 
-  if ! verify_patch "$workbench_html"; then
+  if ! cp "$JS_TEMPLATE" "$managed_js"; then
+    echo "backup retained at: $backup_path" >&2
+    die "failed to write managed Cursor preview JS asset; grant App Management permission to the app running this script, or run it from a terminal that already has that permission"
+  fi
+
+  if ! cp "$patched_html" "$workbench_html"; then
+    echo "backup retained at: $backup_path" >&2
+    die "failed to write Cursor workbench.html; grant App Management permission to the app running this script, or run it from a terminal that already has that permission"
+  fi
+
+  if ! verify_patch "$workbench_html" "$managed_js"; then
     cp -p "$backup_path" "$workbench_html"
     die "marker verification failed; restored backup"
   fi
 
   cat <<EOF
-OK: Cursor workbench CSS injection applied.
+OK: Cursor workbench CSS/JS injection applied.
 
 Workbench:
   $workbench_html
@@ -292,6 +325,10 @@ Workbench:
 Rendered CSS:
   font size -> $font_size_label
   source -> $CSS_TEMPLATE
+
+Rendered JS:
+  source -> $JS_TEMPLATE
+  installed -> $managed_js
 
 Backup:
   $backup_path

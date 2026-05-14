@@ -22,11 +22,17 @@ check() {
 echo "=== Syntax ==="
 check "patch syntax" bash -n "$SCRIPT_DIR/patch"
 check "rollback syntax" bash -n "$SCRIPT_DIR/rollback"
+if command -v node >/dev/null 2>&1; then
+  check "custom JS syntax" node --check "$SCRIPT_DIR/custom.js"
+fi
 check "CSS has no template tokens" bash -c '
   ! grep -q "{{" "$1/custom.css"
 ' _ "$SCRIPT_DIR"
 check "CSS has font-size variable" bash -c '
   grep -q -- "--cursor-inline-markdown-editor-font-size:" "$1/custom.css"
+' _ "$SCRIPT_DIR"
+check "JS has frontmatter marker" bash -c '
+  grep -q -- "cursorMarkdownPreviewFrontmatter" "$1/custom.js"
 ' _ "$SCRIPT_DIR"
 
 echo "=== Fixtures ==="
@@ -57,6 +63,9 @@ HTML
     "$1/patch" >/dev/null
 
   grep -q -- "--cursor-inline-markdown-editor-font-size: 15px" "$tmp/workbench.html"
+  grep -q -- "cursor-markdown-preview-patch.js" "$tmp/workbench.html"
+  grep -q -- "cursorMarkdownPreviewFrontmatter" "$tmp/cursor-markdown-preview-patch.js"
+  grep -q -- "<script src=\"./cursor-markdown-preview-patch.js\"></script>" "$tmp/workbench.html"
   ! grep -q "hotpink" "$tmp/workbench.html"
   ! grep -q "SESSION-ID old" "$tmp/workbench.html"
 ' _ "$SCRIPT_DIR"
@@ -154,8 +163,12 @@ HTML
   HOME="$tmp/home" CURSOR_WORKBENCH_HTML="$tmp/workbench.html" \
     CURSOR_WORKBENCH_PATCH_BACKUP_ROOT="$tmp/backups" \
     "$1/patch" >/dev/null
+  HOME="$tmp/home" CURSOR_WORKBENCH_HTML="$tmp/workbench.html" \
+    CURSOR_WORKBENCH_PATCH_BACKUP_ROOT="$tmp/backups" \
+    "$1/patch" >/dev/null
 
   grep -q -- "--cursor-inline-markdown-editor-font-size: 15px" "$tmp/workbench.html"
+  test -f "$tmp/cursor-markdown-preview-patch.js"
 
   HOME="$tmp/home" CURSOR_WORKBENCH_HTML="$tmp/workbench.html" \
     CURSOR_WORKBENCH_PATCH_BACKUP_ROOT="$tmp/backups" \
@@ -163,6 +176,7 @@ HTML
 
   grep -q "<body>original</body>" "$tmp/workbench.html"
   ! grep -q "VSCODE-CUSTOM-CSS-START" "$tmp/workbench.html"
+  ! test -e "$tmp/cursor-markdown-preview-patch.js"
 ' _ "$SCRIPT_DIR"
 
 echo

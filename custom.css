@@ -15,6 +15,99 @@
   max-width: 760px !important;
 }
 
+.markdown-editor-react__richtext-content.cursor-md-has-frontmatter
+  .tiptap.ProseMirror
+  > hr:first-child {
+  border: 0 !important;
+  font-size: 0 !important;
+  height: 0 !important;
+  line-height: 0 !important;
+  margin: 0 !important;
+  min-height: 0 !important;
+  opacity: 0 !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
+.markdown-editor-react__richtext-content.cursor-md-has-frontmatter
+  .tiptap.ProseMirror
+  > hr:first-child
+  + :is(h1, h2, h3, h4, h5, h6) {
+  font-size: 0 !important;
+  height: 0 !important;
+  line-height: 0 !important;
+  margin: 0 !important;
+  min-height: 0 !important;
+  opacity: 0 !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
+.markdown-editor-react__richtext-content.cursor-md-has-frontmatter
+  .tiptap.ProseMirror
+  > hr:first-child
+  + :is(h1, h2, h3, h4, h5, h6)
+  + h1 {
+  margin-top: 12px !important;
+}
+
+.cursor-md-frontmatter {
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-panel-border, var(--vscode-editorWidget-border));
+  border-radius: 6px;
+  box-sizing: border-box;
+  color: var(--vscode-editor-foreground);
+  font-size: inherit;
+  line-height: 1.45;
+  margin: 22px auto 10px;
+  max-width: 760px;
+  overflow: hidden;
+  user-select: text;
+  width: calc(100% - 32px);
+  -webkit-user-select: text;
+}
+
+.cursor-md-frontmatter table {
+  border-collapse: collapse;
+  display: table;
+  margin: 0;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.cursor-md-frontmatter tr + tr {
+  border-top: 1px solid var(--vscode-panel-border, var(--vscode-editorWidget-border));
+}
+
+.cursor-md-frontmatter th,
+.cursor-md-frontmatter td {
+  border: 0;
+  padding: 10px 14px;
+  vertical-align: middle;
+}
+
+.cursor-md-frontmatter th {
+  background: color-mix(in srgb, var(--vscode-editor-foreground) 5%, transparent);
+  border-right: 1px solid var(--vscode-panel-border, var(--vscode-editorWidget-border));
+  color: var(--vscode-editor-foreground);
+  font-weight: 650;
+  overflow-wrap: anywhere;
+  text-align: center;
+  width: 160px;
+}
+
+.cursor-md-frontmatter td {
+  color: var(--vscode-editor-foreground);
+  color: color-mix(in srgb, var(--vscode-editor-foreground) 94%, transparent);
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /*
    Cursor assigns its own sizes to some rich Markdown elements. Inheriting here
    keeps body text aligned with the editor font size injected above.

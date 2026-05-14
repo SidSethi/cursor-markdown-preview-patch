@@ -1,12 +1,12 @@
-# Custom CSS for Cursor's editable rendered Markdown preview
+# Cursor editable Markdown preview patch
 
-Cursor's native editable rendered Markdown preview does not currently allow custom styling. This repo is a small unsupported workaround: it patches Cursor's installed app bundle and injects custom CSS into `workbench.html`.
+Cursor's native editable rendered Markdown preview does not currently allow custom styling or frontmatter rendering. This repo is a small unsupported workaround: it patches Cursor's installed app bundle, injects custom CSS into `workbench.html`, and installs a same-origin JavaScript asset next to `workbench.html`.
 
-It targets Cursor's private `.markdown-editor-react__richtext-content` DOM, which is used by the native `Preview | Markdown` editor surface.
+It targets Cursor's private `.markdown-editor-react__richtext-content` DOM, which is used by the native `Preview | Markdown` editor surface. The current patch keeps typography customizable and renders leading YAML frontmatter as a compact metadata table inspired by GitHub's Markdown preview.
 
 ## Why this matters
 
-Cursor's native `Preview | Markdown` mode is the only editable rendered Markdown preview I have found in Cursor so far, but it does not currently offer a supported API for custom styling.
+Cursor's native `Preview | Markdown` mode is the only editable rendered Markdown preview I have found in Cursor so far, but it does not currently offer a supported API for custom styling or frontmatter-specific rendering.
 
 Other options like Cursor's VS Code-style `Markdown: Open Preview` and popular extensions like `Markdown Preview Enhanced` offer custom styling, but not inline editing - they both require you to edit the file in the raw editor and view rendered Markdown in a separate window.
 
@@ -14,16 +14,22 @@ See [Surfaces tested](#surfaces-tested) for details.
 
 ## Usage
 
-Put all three files in the same directory, then run:
+Use the repo checkout as-is, then run:
 
 ```bash
 chmod +x patch rollback
 ./patch
 ```
 
+On Sid's dotfiles-managed machines, prefer the stable wrapper:
+
+```bash
+cursor-inline-markdown-preview-patch
+```
+
 To see changes, reload Cursor with `Developer: Reload Window` or restart Cursor.
 
-By default, the script sets the preview base font size to match Cursor's current `editor.fontSize`. Edit `custom.css` for styling changes, then re-run `./patch` and reload Cursor.
+By default, the script sets the preview base font size to match Cursor's current `editor.fontSize`. Edit `custom.css` for styling changes, edit `custom.js` for frontmatter detection/rendering changes, then re-run `./patch` and reload Cursor.
 
 You can choose how the font-size variable is rendered:
 
@@ -39,17 +45,27 @@ To restore the previous backed-up workbench:
 ./rollback
 ```
 
+On Sid's dotfiles-managed machines, prefer the stable rollback wrapper:
+
+```bash
+cursor-inline-markdown-preview-rollback
+```
+
 ## Files
 
 - `patch`
   - Bash script that backs up and patches Cursor's `workbench.html`.
   - Reads Cursor's `editor.fontSize` and renders the CSS with that value.
+  - Installs `custom.js` as `cursor-markdown-preview-patch.js` next to Cursor's `workbench.html`, because Cursor's CSP blocks inline scripts.
   - Can be re-run to apply changes.
 - `rollback`
-  - Bash script that restores the latest backup created by the patch script.
+  - Bash script that restores the latest clean backup created by the patch script.
   - Can also restore a specific `workbench.html` backup path.
+  - Removes the managed JavaScript asset when restoring a workbench that no longer references it.
 - `custom.css`
-  - CSS source for Cursor's editable rendered Markdown preview.
+  - CSS source for Cursor's editable rendered Markdown preview and rendered frontmatter table.
+- `custom.js`
+  - JavaScript source that recognizes leading YAML frontmatter in Cursor's rendered Markdown DOM and replaces the raw render with a compact metadata table.
 - `test.sh`
   - Fixture smoke tests for the patch and rollback scripts.
 
@@ -60,6 +76,7 @@ To restore the previous backed-up workbench:
 - Cursor updates may overwrite the patch. Re-running the script will re-apply the patch.
 - Private selectors may change on any Cursor update.
 - macOS may require App Management permission for the terminal app running the patch.
+- The frontmatter renderer is intentionally conservative: JavaScript detects and inserts the display table, while CSS does the visual folding of Cursor's raw frontmatter render.
 
 ## How it works
 
@@ -71,6 +88,7 @@ The script inserts a managed block before `</html>` in Cursor's workbench file:
 <style>
 ...
 </style>
+<script src="./cursor-markdown-preview-patch.js"></script>
 <!-- !! VSCODE-CUSTOM-CSS-END !! -->
 ```
 
@@ -90,11 +108,37 @@ The value in `custom.css` is used directly when running `./patch --font-size css
 
 This is a snapshot at patch time. It does not live-update if you later change `editor.fontSize` or `custom.css`. Rerun `./patch` and reload Cursor.
 
+### Frontmatter rendering
+
+`custom.js` watches Cursor's editable Markdown preview for the rendered shape of
+leading YAML frontmatter. When it sees a document begin with a `---` block, it
+hides Cursor's raw rendered nodes and inserts a compact table inspired by
+GitHub's Markdown frontmatter preview.
+
+For example:
+
+```yaml
+---
+name: skill-author
+description: Create or update Codex and Agent Skills.
+metadata:
+  short-description: Create and refine local skills
+---
+```
+
+renders as rows for `name`, `description`, and
+`metadata.short-description`. The replacement table is `contenteditable=false`
+so normal document editing stays focused on the Markdown body.
+
 ## Rollback and backups
 
-Every run creates a timestamped backup and prints the rollback command.
+Every run creates a timestamped backup and prints the rollback command. Backup
+directory names are made unique even when the patch is run multiple times in the
+same second.
 
-`./rollback` restores the latest backup created by `./patch`. If you have run `./patch` multiple times, the latest backup may already include an older version of this patch. To restore a specific backup, pass that backup path explicitly.
+`./rollback` restores the newest clean backup created by `./patch`, skipping
+backups that already contain the managed patch block. To restore a specific
+backup, pass that backup path explicitly.
 
 Default backup root:
 
@@ -108,7 +152,7 @@ Override it if desired:
 CURSOR_WORKBENCH_PATCH_BACKUP_ROOT="$HOME/somewhere/cursor-backups" ./patch
 ```
 
-Restore the latest backup:
+Restore the latest clean backup:
 
 ```bash
 ./rollback
@@ -121,6 +165,12 @@ Restore a specific backup:
 ```
 
 The rollback script uses the same `CURSOR_WORKBENCH_PATCH_BACKUP_ROOT` override.
+
+## Archive
+
+Read-only historical notes:
+
+- [2026-05-14 frontmatter rendering postmortem](./ARCHIVE-2026-05-14-frontmatter-rendering-postmortem.md)
 
 ## Version support
 
