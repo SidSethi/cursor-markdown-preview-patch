@@ -1,12 +1,12 @@
-# Cursor editable Markdown preview patch
+# Cursor editable Markdown preview CSS/JS patch
 
-Cursor's native editable rendered Markdown preview does not currently allow custom styling or frontmatter rendering. This repo is a small unsupported workaround: it patches Cursor's installed app bundle, injects custom CSS into `workbench.html`, and installs a same-origin JavaScript asset next to `workbench.html`.
+Cursor's native editable rendered Markdown preview does not currently allow custom styling or frontmatter rendering. This repo is a small unsupported workaround: it patches Cursor's installed app bundle, injects custom CSS into `workbench.html`, and installs a same-origin JavaScript renderer next to `workbench.html`.
 
-It targets Cursor's private `.markdown-editor-react__richtext-content` DOM, which is used by the native `Preview | Markdown` editor surface. The current patch keeps typography customizable and renders leading YAML frontmatter as a compact metadata table inspired by GitHub's Markdown preview.
+It targets Cursor's private `.markdown-editor-react__richtext-content` DOM, which is used by the native `Preview | Markdown` editor surface. The current patch combines CSS typography/layout changes with JavaScript frontmatter detection so leading YAML frontmatter renders as a compact metadata table inspired by GitHub's Markdown preview.
 
 ## Why this matters
 
-Cursor's native `Preview | Markdown` mode is the only editable rendered Markdown preview I have found in Cursor so far, but it does not currently offer a supported API for custom styling or frontmatter-specific rendering.
+Cursor's native `Preview | Markdown` mode is the only editable rendered Markdown preview I have found in Cursor so far, but it does not currently offer a supported API for custom styling or frontmatter-specific behavior.
 
 Other options like Cursor's VS Code-style `Markdown: Open Preview` and popular extensions like `Markdown Preview Enhanced` offer custom styling, but not inline editing - they both require you to edit the file in the raw editor and view rendered Markdown in a separate window.
 
@@ -92,7 +92,7 @@ The script inserts a managed block before `</html>` in Cursor's workbench file:
 <!-- !! VSCODE-CUSTOM-CSS-END !! -->
 ```
 
-The script removes any previous managed block before writing a new one, so it is safe to rerun after editing the CSS or after Cursor updates.
+The script removes any previous managed block before writing a new one, so it is safe to rerun after editing `custom.css`, editing `custom.js`, or after Cursor updates.
 
 `custom.css` stays valid CSS. Instead of using invalid template tokens, `patch` can rewrite this custom property in the temporary injected copy:
 
