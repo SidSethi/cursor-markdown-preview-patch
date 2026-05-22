@@ -172,9 +172,21 @@ Read-only historical notes:
 
 - [2026-05-14 frontmatter rendering postmortem](./ARCHIVE-2026-05-14-frontmatter-rendering-postmortem.md)
 
-## Version support
+## Verification and version support
 
-Tested on:
+Fixture tests were last run locally against this checkout on 2026-05-21:
+
+- `./test.sh`: 11 passed, 0 failed
+
+The live Cursor app was not modified during that preflight. The local app bundle
+was checked for the private selectors this patch depends on:
+
+- Cursor Version: 3.4.20
+- `markdown-editor-react__richtext-content`: present in bundled CSS and JS
+- `contentClassName:"markdown-editor-react__richtext-content"`: present in bundled JS
+- `editable:!0`: present in bundled JS
+
+The original runtime validation for this patch was performed on:
 
 - Version: 3.3.16 (Universal)
 - VSCode Version: 1.105.1
