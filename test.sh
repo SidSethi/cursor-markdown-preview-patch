@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Smoke tests for the Cursor editable rendered Markdown preview patch scripts.
+#
+# shellcheck disable=SC2016
 
 set -euo pipefail
 
@@ -22,8 +24,17 @@ check() {
 echo "=== Syntax ==="
 check "patch syntax" bash -n "$SCRIPT_DIR/patch"
 check "rollback syntax" bash -n "$SCRIPT_DIR/rollback"
+check "ensure-patched syntax" bash -n "$SCRIPT_DIR/ensure-patched"
+check "install-auto-reapply syntax" bash -n "$SCRIPT_DIR/install-auto-reapply"
+check "verify-auto-reapply syntax" bash -n "$SCRIPT_DIR/verify-auto-reapply"
 if command -v node >/dev/null 2>&1; then
   check "custom JS syntax" node --check "$SCRIPT_DIR/custom.js"
+fi
+if command -v swiftc >/dev/null 2>&1; then
+  check "runner Swift syntax" swiftc -parse "$SCRIPT_DIR/runner/CursorMarkdownPreviewPatchEnsure.swift"
+fi
+if command -v plutil >/dev/null 2>&1; then
+  check "LaunchAgent example plist syntax" plutil -lint "$SCRIPT_DIR/launchd/com.example.cursor-markdown-preview-patch.ensure.plist"
 fi
 check "CSS has no template tokens" bash -c '
   ! grep -q "{{" "$1/custom.css"
@@ -177,6 +188,190 @@ HTML
   grep -q "<body>original</body>" "$tmp/workbench.html"
   ! grep -q "VSCODE-CUSTOM-CSS-START" "$tmp/workbench.html"
   ! test -e "$tmp/cursor-markdown-preview-patch.js"
+' _ "$SCRIPT_DIR"
+
+check "ensure-patched skips patched fixture" bash -c '
+  set -euo pipefail
+  tmp=$(mktemp -d)
+  trap "rm -rf \"$tmp\"" EXIT
+
+  cat > "$tmp/workbench.html" <<HTML
+<!DOCTYPE html>
+<html>
+<body></body>
+<!-- !! VSCODE-CUSTOM-CSS-START !! -->
+<script src="./cursor-markdown-preview-patch.js"></script>
+<!-- !! VSCODE-CUSTOM-CSS-END !! -->
+</html>
+HTML
+
+  cat > "$tmp/cursor-markdown-preview-patch.js" <<JS
+window.cursorMarkdownPreviewFrontmatter = true;
+JS
+
+  cat > "$tmp/fail-if-called" <<SH
+#!/usr/bin/env bash
+exit 99
+SH
+  chmod +x "$tmp/fail-if-called"
+
+  CURSOR_WORKBENCH_HTML="$tmp/workbench.html" \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_CMD="$tmp/fail-if-called" \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_DEBOUNCE_SECONDS=0 \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_LOCK_DIR="$tmp/lock" \
+    "$1/ensure-patched" >/dev/null
+  ! test -e "$tmp/patch-called"
+' _ "$SCRIPT_DIR"
+
+check "ensure-patched applies missing fixture" bash -c '
+  set -euo pipefail
+  tmp=$(mktemp -d)
+  trap "rm -rf \"$tmp\"" EXIT
+
+  cat > "$tmp/workbench.html" <<HTML
+<!DOCTYPE html>
+<html>
+<body></body>
+</html>
+HTML
+
+  cat > "$tmp/fake-patch" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+touch "\$TMP_FIXTURE/patch-called"
+cat > "\$CURSOR_WORKBENCH_HTML" <<HTML
+<!DOCTYPE html>
+<html>
+<body></body>
+<!-- !! VSCODE-CUSTOM-CSS-START !! -->
+<script src="./cursor-markdown-preview-patch.js"></script>
+<!-- !! VSCODE-CUSTOM-CSS-END !! -->
+</html>
+HTML
+cat > "\$(dirname "\$CURSOR_WORKBENCH_HTML")/cursor-markdown-preview-patch.js" <<JS
+window.cursorMarkdownPreviewFrontmatter = true;
+JS
+SH
+  chmod +x "$tmp/fake-patch"
+
+  TMP_FIXTURE="$tmp" \
+    CURSOR_WORKBENCH_HTML="$tmp/workbench.html" \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_CMD="$tmp/fake-patch" \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_DEBOUNCE_SECONDS=0 \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_LOCK_DIR="$tmp/lock" \
+    "$1/ensure-patched" >/dev/null
+  test -f "$tmp/patch-called"
+  grep -q "VSCODE-CUSTOM-CSS-START" "$tmp/workbench.html"
+  grep -q "cursorMarkdownPreviewFrontmatter" "$tmp/cursor-markdown-preview-patch.js"
+' _ "$SCRIPT_DIR"
+
+check "ensure-patched patches ShipIt update fixture" bash -c '
+  set -euo pipefail
+  tmp=$(mktemp -d)
+  trap "rm -rf \"$tmp\"" EXIT
+
+  workbench_dir="$tmp/shipit/update.test/Cursor.app/Contents/Resources/app/out/vs/code/electron-sandbox/workbench"
+  mkdir -p "$workbench_dir"
+  cat > "$workbench_dir/workbench.html" <<HTML
+<!DOCTYPE html>
+<html>
+<body></body>
+</html>
+HTML
+
+  cat > "$tmp/fake-patch" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+touch "\$TMP_FIXTURE/patch-called"
+cat > "\$CURSOR_WORKBENCH_HTML" <<HTML
+<!DOCTYPE html>
+<html>
+<body></body>
+<!-- !! VSCODE-CUSTOM-CSS-START !! -->
+<script src="./cursor-markdown-preview-patch.js"></script>
+<!-- !! VSCODE-CUSTOM-CSS-END !! -->
+</html>
+HTML
+cat > "\$(dirname "\$CURSOR_WORKBENCH_HTML")/cursor-markdown-preview-patch.js" <<JS
+window.cursorMarkdownPreviewFrontmatter = true;
+JS
+SH
+  chmod +x "$tmp/fake-patch"
+
+  TMP_FIXTURE="$tmp" \
+    CURSOR_APP_BUNDLE="$tmp/missing-app/Cursor.app" \
+    CURSOR_HOME_APP_BUNDLE="$tmp/missing-home-app/Cursor.app" \
+    CURSOR_SHIPIT_DIR="$tmp/shipit" \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_CMD="$tmp/fake-patch" \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_DEBOUNCE_SECONDS=0 \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_LOCK_DIR="$tmp/lock" \
+    "$1/ensure-patched" >/dev/null
+  test -f "$tmp/patch-called"
+  grep -q "VSCODE-CUSTOM-CSS-START" "$workbench_dir/workbench.html"
+  grep -q "cursorMarkdownPreviewFrontmatter" "$workbench_dir/cursor-markdown-preview-patch.js"
+' _ "$SCRIPT_DIR"
+
+check "ensure-patched real patch fixture" bash -c '
+  set -euo pipefail
+  tmp=$(mktemp -d)
+  trap "rm -rf \"$tmp\"" EXIT
+
+  mkdir -p "$tmp/home/Library/Application Support/Cursor/User"
+  cat > "$tmp/home/Library/Application Support/Cursor/User/settings.json" <<JSON
+{
+  "editor.fontSize": 15
+}
+JSON
+
+  cat > "$tmp/workbench.html" <<HTML
+<!DOCTYPE html>
+<html>
+<body></body>
+</html>
+HTML
+
+  HOME="$tmp/home" \
+    CURSOR_WORKBENCH_HTML="$tmp/workbench.html" \
+    CURSOR_WORKBENCH_PATCH_BACKUP_ROOT="$tmp/backups" \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_DEBOUNCE_SECONDS=0 \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_LOCK_DIR="$tmp/lock" \
+    "$1/ensure-patched" --font-size 18 >/dev/null
+
+  grep -q -- "--cursor-inline-markdown-editor-font-size: 18px" "$tmp/workbench.html"
+  grep -q "cursorMarkdownPreviewFrontmatter" "$tmp/cursor-markdown-preview-patch.js"
+  backup_count=$(find "$tmp/backups" -path "*/workbench.html" -type f | wc -l | tr -d " ")
+  [[ "$backup_count" == "1" ]]
+
+  HOME="$tmp/home" \
+    CURSOR_WORKBENCH_HTML="$tmp/workbench.html" \
+    CURSOR_WORKBENCH_PATCH_BACKUP_ROOT="$tmp/backups" \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_DEBOUNCE_SECONDS=0 \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_LOCK_DIR="$tmp/lock" \
+    "$1/ensure-patched" --font-size 20 >/dev/null
+
+  backup_count=$(find "$tmp/backups" -path "*/workbench.html" -type f | wc -l | tr -d " ")
+  [[ "$backup_count" == "1" ]]
+  grep -q -- "--cursor-inline-markdown-editor-font-size: 18px" "$tmp/workbench.html"
+' _ "$SCRIPT_DIR"
+
+check "ensure-patched exits when locked" bash -c '
+  set -euo pipefail
+  tmp=$(mktemp -d)
+  trap "rm -rf \"$tmp\"" EXIT
+
+  mkdir "$tmp/lock"
+  cat > "$tmp/fail-if-called" <<SH
+#!/usr/bin/env bash
+exit 99
+SH
+  chmod +x "$tmp/fail-if-called"
+
+  CURSOR_WORKBENCH_HTML="$tmp/missing-workbench.html" \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_CMD="$tmp/fail-if-called" \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_DEBOUNCE_SECONDS=0 \
+    CURSOR_MARKDOWN_PREVIEW_PATCH_LOCK_DIR="$tmp/lock" \
+    "$1/ensure-patched" >/dev/null
+  test -d "$tmp/lock"
 ' _ "$SCRIPT_DIR"
 
 echo

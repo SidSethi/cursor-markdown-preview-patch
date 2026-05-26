@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.cursor-markdown-preview-patch.ensure</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/ABSOLUTE/PATH/TO/HOME/Applications/Cursor Markdown Preview Patch Ensure.app/Contents/MacOS/CursorMarkdownPreviewPatchEnsure</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>WatchPaths</key>
+  <array>
+    <string>/ABSOLUTE/PATH/TO/HOME/Library/Caches/com.todesktop.230313mzl4w4u92.ShipIt</string>
+    <string>/Applications/Cursor.app</string>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/ABSOLUTE/PATH/TO/HOME/Library/Logs/cursor-markdown-preview-patch/launchd.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/ABSOLUTE/PATH/TO/HOME/Library/Logs/cursor-markdown-preview-patch/launchd.err.log</string>
+
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+</dict>
+</plist>

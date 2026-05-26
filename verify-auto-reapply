@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+#
+# End-to-end verifier for macOS Cursor patch auto-reapply.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+
+readonly LABEL="${CURSOR_MARKDOWN_PREVIEW_PATCH_LABEL:-com.sidsethi.cursor-markdown-preview-patch.ensure}"
+DOMAIN="gui/$(id -u)"
+readonly DOMAIN
+readonly SERVICE="$DOMAIN/$LABEL"
+readonly WORKBENCH_HTML="${CURSOR_WORKBENCH_HTML:-/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-sandbox/workbench/workbench.html}"
+readonly JS_OUTPUT_NAME="cursor-markdown-preview-patch.js"
+MANAGED_JS="$(dirname "$WORKBENCH_HTML")/$JS_OUTPUT_NAME"
+readonly MANAGED_JS
+readonly START_MARKER="<!-- !! VSCODE-CUSTOM-CSS-START !! -->"
+readonly JS_VERIFY_TOKEN="cursorMarkdownPreviewFrontmatter"
+readonly POLL_SECONDS="${CURSOR_MARKDOWN_PREVIEW_PATCH_VERIFY_POLL_SECONDS:-90}"
+readonly POLL_INTERVAL_SECONDS="${CURSOR_MARKDOWN_PREVIEW_PATCH_VERIFY_POLL_INTERVAL_SECONDS:-2}"
+readonly RESTORE_ON_FAILURE="${CURSOR_MARKDOWN_PREVIEW_PATCH_VERIFY_RESTORE_ON_FAILURE:-1}"
+
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+is_patch_present() {
+  [[ -f "$WORKBENCH_HTML" ]] &&
+    grep -qF "$START_MARKER" "$WORKBENCH_HTML" &&
+    grep -qF "$JS_OUTPUT_NAME" "$WORKBENCH_HTML" &&
+    [[ -f "$MANAGED_JS" ]] &&
+    grep -qF "$JS_VERIFY_TOKEN" "$MANAGED_JS"
+}
+
+launchd_value() {
+  local pattern="$1"
+  launchctl print "$SERVICE" 2>/dev/null | awk -F'= ' -v pattern="$pattern" '$0 ~ pattern {print $2; exit}'
+}
+
+launchd_runs() {
+  launchd_value 'runs = ' | tr -d ' '
+}
+
+launchd_last_exit() {
+  launchd_value 'last exit code = '
+}
+
+launchd_state() {
+  launchd_value 'state = '
+}
+
+restore_patch() {
+  echo "Restoring patch via manual ensure-patched path..."
+  CURSOR_MARKDOWN_PREVIEW_PATCH_DEBOUNCE_SECONDS=0 "$SCRIPT_DIR/ensure-patched"
+}
+
+main() {
+  [[ -x "$SCRIPT_DIR/rollback" ]] || die "rollback script is not executable"
+  [[ -x "$SCRIPT_DIR/ensure-patched" ]] || die "ensure-patched script is not executable"
+  [[ -f "$WORKBENCH_HTML" ]] || die "workbench.html not found: $WORKBENCH_HTML"
+  launchctl print "$SERVICE" >/dev/null 2>&1 || die "LaunchAgent is not loaded: $SERVICE"
+
+  echo "Checking starting state..."
+  if is_patch_present; then
+    echo "OK: patch is currently present."
+  else
+    echo "WARN: patch is not present before verification."
+  fi
+
+  local runs_before
+  runs_before="$(launchd_runs)"
+  [[ -n "$runs_before" ]] || runs_before=0
+
+  echo "Rolling back patch to simulate a Cursor update..."
+  "$SCRIPT_DIR/rollback"
+
+  if is_patch_present; then
+    die "rollback completed but patch still appears present"
+  fi
+  echo "OK: rollback removed managed patch."
+
+  echo "Triggering LaunchAgent: $SERVICE"
+  launchctl kickstart -k "$SERVICE"
+
+  local deadline=$((SECONDS + POLL_SECONDS))
+  local runs_after last_exit state
+  runs_after="$runs_before"
+  last_exit=""
+  state=""
+
+  while (( SECONDS < deadline )); do
+    runs_after="$(launchd_runs)"
+    last_exit="$(launchd_last_exit)"
+    state="$(launchd_state)"
+
+    if [[ -n "$runs_after" && "$runs_after" != "$runs_before" && "$state" == "not running" && "$last_exit" != "(never exited)" && -n "$last_exit" ]]; then
+      break
+    fi
+
+    sleep "$POLL_INTERVAL_SECONDS"
+  done
+
+  echo "LaunchAgent runs before: $runs_before"
+  echo "LaunchAgent runs after:  ${runs_after:-unknown}"
+  echo "LaunchAgent state:       ${state:-unknown}"
+  echo "LaunchAgent last exit:   ${last_exit:-unknown}"
+
+  if [[ "$last_exit" == "0" ]] && is_patch_present; then
+    echo "OK: auto-reapply restored the patch."
+    exit 0
+  fi
+
+  echo "FAIL: auto-reapply did not restore the patch." >&2
+  echo "This usually means the runner app still lacks App Management permission:" >&2
+  echo "  $HOME/Applications/Cursor Markdown Preview Patch Ensure.app" >&2
+
+  if [[ "$RESTORE_ON_FAILURE" == "1" ]]; then
+    restore_patch
+  else
+    echo "WARN: leaving patch removed because CURSOR_MARKDOWN_PREVIEW_PATCH_VERIFY_RESTORE_ON_FAILURE=$RESTORE_ON_FAILURE" >&2
+  fi
+
+  exit 1
+}
+
+main "$@"

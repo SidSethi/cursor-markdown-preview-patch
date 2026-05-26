@@ -17,7 +17,7 @@ See [Surfaces tested](#surfaces-tested) for details.
 Use the repo checkout as-is, then run:
 
 ```bash
-chmod +x patch rollback
+chmod +x patch rollback ensure-patched install-auto-reapply verify-auto-reapply
 ./patch
 ```
 
@@ -38,6 +38,114 @@ You can choose how the font-size variable is rendered:
 ./patch --font-size css    # use the value already written in custom.css
 ./patch --font-size 18     # inject 18px
 ```
+
+## Auto-reapply after Cursor updates
+
+Cursor updates replace the app bundle and can remove the injected patch. The
+repo includes `ensure-patched`, a small idempotent wrapper intended for macOS
+`launchd` triggers:
+
+```bash
+./ensure-patched
+```
+
+`ensure-patched` checks whether the managed markers and JavaScript asset are
+already present. If the patch is missing, it runs `./patch`; if the patch is
+already present, it exits without creating a new backup. By default it waits 20
+seconds before checking so Cursor's updater can finish replacing files; set
+`CURSOR_MARKDOWN_PREVIEW_PATCH_DEBOUNCE_SECONDS=0` for immediate manual checks.
+
+For automatic reapply on macOS, use the app-backed per-user LaunchAgent:
+
+```bash
+./install-auto-reapply
+```
+
+This builds a small local runner app, installs it at:
+
+```text
+~/Applications/Cursor Markdown Preview Patch Ensure.app
+```
+
+and installs a per-user LaunchAgent at:
+
+```text
+~/Library/LaunchAgents/com.sidsethi.cursor-markdown-preview-patch.ensure.plist
+```
+
+The LaunchAgent runs the executable inside the runner app bundle, and the runner
+executes `./ensure-patched`. This gives macOS a concrete app bundle to grant
+App Management permission to. Grant that one-time permission in:
+
+```text
+System Settings > Privacy & Security > App Management
+```
+
+Enable:
+
+```text
+~/Applications/Cursor Markdown Preview Patch Ensure.app
+```
+
+If the runner is not listed yet, run `./verify-auto-reapply` once. macOS should
+block the runner's first protected write and add it to App Management as a
+disabled app; the verifier restores the patch manually before failing. Then
+enable the runner and rerun `./verify-auto-reapply`.
+
+Do not rebuild or reinstall the runner after granting App Management unless you
+are prepared to re-enable the permission. This local app is ad-hoc signed, so
+changing its executable can change the code identity macOS uses for privacy
+decisions.
+
+The LaunchAgent watches:
+
+```text
+~/Library/Caches/<Cursor bundle id>.ShipIt
+/Applications/Cursor.app
+```
+
+The example app-backed plist is:
+
+```text
+launchd/com.example.cursor-markdown-preview-patch.ensure.plist
+```
+
+`./install-auto-reapply` writes the live plist for this machine. To inspect it:
+
+```bash
+plutil -p "$HOME/Library/LaunchAgents/com.sidsethi.cursor-markdown-preview-patch.ensure.plist"
+launchctl kickstart -k "gui/$(id -u)/com.sidsethi.cursor-markdown-preview-patch.ensure"
+launchctl print "gui/$(id -u)/com.sidsethi.cursor-markdown-preview-patch.ensure"
+```
+
+The app-backed LaunchAgent runs the runner executable directly, so `launchctl`
+shows the runner's exit status. The logs are still the best place to inspect the
+patch result:
+
+```text
+~/Library/Logs/cursor-markdown-preview-patch/ensure.log
+~/Library/Logs/cursor-markdown-preview-patch/ensure.err.log
+```
+
+To run the end-to-end acceptance test:
+
+```bash
+./verify-auto-reapply
+```
+
+That verifier intentionally rolls back the live patch, triggers the LaunchAgent,
+waits for the runner to finish, and confirms the managed markers and JavaScript
+asset returned. If the LaunchAgent path fails, it restores the patch through the
+manual `ensure-patched` path before exiting with failure.
+
+To find Cursor's current bundle id:
+
+```bash
+defaults read /Applications/Cursor.app/Contents/Info CFBundleIdentifier
+```
+
+See [AUTO-REAPPLY.md](./AUTO-REAPPLY.md) for the design notes, tradeoffs, and
+multi-machine considerations.
 
 To restore the previous backed-up workbench:
 
@@ -62,6 +170,21 @@ cursor-inline-markdown-preview-rollback
   - Bash script that restores the latest clean backup created by the patch script.
   - Can also restore a specific `workbench.html` backup path.
   - Removes the managed JavaScript asset when restoring a workbench that no longer references it.
+- `ensure-patched`
+  - Bash script for launchd or other update triggers.
+  - Checks for the managed patch before running `patch`, so it avoids unnecessary backups.
+  - Uses a lock and short debounce for duplicate filesystem events during updates.
+- `install-auto-reapply`
+  - Builds the local runner app and installs the app-backed LaunchAgent.
+  - Backs up an existing live plist before replacing it.
+- `verify-auto-reapply`
+  - End-to-end verifier for the auto-reapply path.
+  - Rolls back the live patch, triggers the LaunchAgent, verifies restoration,
+    and restores manually on failure.
+- `runner/`
+  - Swift source for the local app that runs `ensure-patched`.
+- `launchd/`
+  - Example app-backed per-user LaunchAgent plist for macOS auto-reapply.
 - `custom.css`
   - CSS source for Cursor's editable rendered Markdown preview and rendered frontmatter table.
 - `custom.js`
@@ -75,7 +198,11 @@ cursor-inline-markdown-preview-rollback
 - Cursor may show this or a similar message: `Your Cursor installation appears to be corrupt. Please reinstall.` This warning is expected because the patch modifies a sealed app-bundle resource.
 - Cursor updates may overwrite the patch. Re-running the script will re-apply the patch.
 - Private selectors may change on any Cursor update.
-- macOS may require App Management permission for the terminal app running the patch.
+- macOS requires App Management permission for the app that writes into another
+  app bundle. For auto-reapply, grant it to the local runner app installed by
+  `./install-auto-reapply`.
+- The LaunchAgent auto-reapply flow is macOS-specific and still modifies
+  Cursor's unsupported app-bundle internals.
 - The frontmatter renderer is intentionally conservative: JavaScript detects and inserts the display table, while CSS does the visual folding of Cursor's raw frontmatter render.
 
 ## How it works
@@ -174,12 +301,15 @@ Read-only historical notes:
 
 ## Verification and version support
 
-Fixture tests were last run locally against this checkout on 2026-05-21:
+Verification was last run locally against this checkout on 2026-05-26:
 
-- `./test.sh`: 11 passed, 0 failed
+- `./test.sh`: 21 passed, 0 failed
+- `./verify-auto-reapply`: passed
+- `shellcheck patch rollback ensure-patched install-auto-reapply verify-auto-reapply test.sh`: passed
+- `swiftc -parse runner/CursorMarkdownPreviewPatchEnsure.swift`: passed
 
-The live Cursor app was not modified during that preflight. The local app bundle
-was checked for the private selectors this patch depends on:
+A previous local app-bundle selector preflight was run on 2026-05-21. The live
+Cursor app was not modified during that preflight:
 
 - Cursor Version: 3.4.20
 - `markdown-editor-react__richtext-content`: present in bundled CSS and JS

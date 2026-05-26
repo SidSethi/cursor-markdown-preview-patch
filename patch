@@ -6,7 +6,8 @@
 
 set -euo pipefail
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
 readonly CSS_TEMPLATE="$SCRIPT_DIR/custom.css"
 readonly JS_TEMPLATE="$SCRIPT_DIR/custom.js"
 readonly JS_OUTPUT_NAME="cursor-markdown-preview-patch.js"

@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+#
+# Ensure Cursor's editable rendered Markdown preview patch is present.
+#
+# Intended for launchd or other update triggers. It exits quickly when the
+# managed patch is already installed, and runs ./patch only when needed.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+readonly PATCH_CMD="${CURSOR_MARKDOWN_PREVIEW_PATCH_CMD:-$SCRIPT_DIR/patch}"
+readonly LOCK_DIR="${CURSOR_MARKDOWN_PREVIEW_PATCH_LOCK_DIR:-${TMPDIR:-/tmp}/cursor-markdown-preview-patch.ensure.lock}"
+readonly DEBOUNCE_SECONDS="${CURSOR_MARKDOWN_PREVIEW_PATCH_DEBOUNCE_SECONDS:-20}"
+readonly CURSOR_APP_BUNDLE="${CURSOR_APP_BUNDLE:-/Applications/Cursor.app}"
+readonly CURSOR_HOME_APP_BUNDLE="${CURSOR_HOME_APP_BUNDLE:-$HOME/Applications/Cursor.app}"
+readonly JS_OUTPUT_NAME="cursor-markdown-preview-patch.js"
+readonly START_MARKER="<!-- !! VSCODE-CUSTOM-CSS-START !! -->"
+readonly END_MARKER="<!-- !! VSCODE-CUSTOM-CSS-END !! -->"
+readonly JS_VERIFY_TOKEN="cursorMarkdownPreviewFrontmatter"
+
+print_script_usage() {
+  cat <<'USAGE' >&2
+Usage: ensure-patched [patch args...]
+
+Checks whether Cursor's workbench already contains this repo's managed CSS/JS
+patch. If not, runs ./patch with any provided arguments. Designed for launchd
+WatchPaths triggers after Cursor updates replace the app bundle.
+
+Environment:
+  CURSOR_WORKBENCH_HTML
+    Test hook or explicit workbench.html path.
+  CURSOR_MARKDOWN_PREVIEW_PATCH_CMD
+    Patch command to run. Defaults to this repo's ./patch.
+  CURSOR_MARKDOWN_PREVIEW_PATCH_LOCK_DIR
+    Lock directory. Defaults to TMPDIR/cursor-markdown-preview-patch.ensure.lock.
+  CURSOR_MARKDOWN_PREVIEW_PATCH_DEBOUNCE_SECONDS
+    Seconds to wait before checking. Defaults to 20.
+  CURSOR_APP_BUNDLE
+    Primary Cursor.app bundle. Defaults to /Applications/Cursor.app.
+  CURSOR_HOME_APP_BUNDLE
+    Secondary Cursor.app bundle. Defaults to ~/Applications/Cursor.app.
+  CURSOR_SHIPIT_DIR
+    Cursor ShipIt cache directory. Defaults to ~/Library/Caches/<bundle id>.ShipIt.
+USAGE
+}
+
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+cursor_bundle_id() {
+  if [[ -d "$CURSOR_APP_BUNDLE" ]] && command -v defaults >/dev/null 2>&1; then
+    defaults read "$CURSOR_APP_BUNDLE/Contents/Info" CFBundleIdentifier 2>/dev/null || true
+  fi
+}
+
+find_app_workbench_htmls() {
+  local app_bundle path
+
+  local app_bundles=(
+    "$CURSOR_APP_BUNDLE"
+    "$CURSOR_HOME_APP_BUNDLE"
+  )
+
+  for app_bundle in "${app_bundles[@]}"; do
+    local candidates=(
+      "$app_bundle/Contents/Resources/app/out/vs/code/electron-sandbox/workbench/workbench.html"
+      "$app_bundle/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html"
+    )
+
+    for path in "${candidates[@]}"; do
+      if [[ -f "$path" ]]; then
+        printf '%s\n' "$path"
+      fi
+    done
+  done
+}
+
+find_shipit_workbench_htmls() {
+  local shipit_dir="${CURSOR_SHIPIT_DIR:-}"
+
+  if [[ -z "$shipit_dir" ]]; then
+    local bundle_id
+    bundle_id="$(cursor_bundle_id)"
+    [[ -n "$bundle_id" ]] || return 0
+    shipit_dir="$HOME/Library/Caches/$bundle_id.ShipIt"
+  fi
+
+  [[ -d "$shipit_dir" ]] || return 0
+
+  find "$shipit_dir" \
+    -path '*/Cursor.app/Contents/Resources/app/out/vs/code/*/workbench/workbench.html' \
+    -type f 2>/dev/null | sort
+}
+
+find_workbench_htmls() {
+
+  if [[ -n "${CURSOR_WORKBENCH_HTML:-}" ]]; then
+    [[ -f "$CURSOR_WORKBENCH_HTML" ]] || return 1
+    printf '%s\n' "$CURSOR_WORKBENCH_HTML"
+    return 0
+  fi
+
+  {
+    find_shipit_workbench_htmls
+    find_app_workbench_htmls
+  } | awk '!seen[$0]++'
+}
+
+is_patch_present() {
+  local workbench_html="$1"
+  local managed_js
+  managed_js="$(dirname "$workbench_html")/$JS_OUTPUT_NAME"
+
+  [[ -f "$workbench_html" ]] &&
+    grep -qF "$START_MARKER" "$workbench_html" &&
+    grep -qF "$END_MARKER" "$workbench_html" &&
+    grep -qF "$JS_OUTPUT_NAME" "$workbench_html" &&
+    [[ -f "$managed_js" ]] &&
+    grep -qF "$JS_VERIFY_TOKEN" "$managed_js"
+}
+
+main() {
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    print_script_usage
+    exit 0
+  fi
+
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo "OK: another ensure-patched run is already active."
+    exit 0
+  fi
+  trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+
+  echo "Waiting ${DEBOUNCE_SECONDS}s for Cursor update files to settle..."
+  sleep "$DEBOUNCE_SECONDS"
+
+  local workbench_html
+  local workbench_targets=()
+  while IFS= read -r workbench_html; do
+    workbench_targets+=("$workbench_html")
+  done < <(find_workbench_htmls)
+
+  if [[ "${#workbench_targets[@]}" -eq 0 ]]; then
+    die "Cursor workbench.html not found in known locations"
+  fi
+
+  local missing_targets=()
+  for workbench_html in "${workbench_targets[@]}"; do
+    if is_patch_present "$workbench_html"; then
+      echo "OK: patch already present in $workbench_html"
+    else
+      missing_targets+=("$workbench_html")
+    fi
+  done
+
+  if [[ "${#missing_targets[@]}" -eq 0 ]]; then
+    echo "OK: Cursor Markdown preview patch already present."
+    exit 0
+  fi
+
+  [[ -x "$PATCH_CMD" ]] || die "patch command not found or not executable: $PATCH_CMD"
+
+  local failed=0
+  for workbench_html in "${missing_targets[@]}"; do
+    echo "Applying Cursor Markdown preview patch to $workbench_html..."
+    if ! CURSOR_WORKBENCH_HTML="$workbench_html" "$PATCH_CMD" "$@"; then
+      echo "WARN: failed to patch $workbench_html" >&2
+      failed=1
+      continue
+    fi
+
+    if is_patch_present "$workbench_html"; then
+      echo "OK: Cursor Markdown preview patch ensured in $workbench_html."
+    else
+      echo "WARN: patch command completed, but managed markers were not found in $workbench_html" >&2
+      failed=1
+    fi
+  done
+
+  if [[ "$failed" -ne 0 ]]; then
+    die "one or more Cursor workbench targets could not be patched"
+  fi
+}
+
+main "$@"

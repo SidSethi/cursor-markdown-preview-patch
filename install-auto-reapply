@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+#
+# Build and install the macOS app-backed LaunchAgent for Cursor patch reapply.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+
+readonly LABEL="${CURSOR_MARKDOWN_PREVIEW_PATCH_LABEL:-com.sidsethi.cursor-markdown-preview-patch.ensure}"
+readonly APP_PATH="${CURSOR_MARKDOWN_PREVIEW_PATCH_RUNNER_APP:-$HOME/Applications/Cursor Markdown Preview Patch Ensure.app}"
+readonly PLIST_PATH="${CURSOR_MARKDOWN_PREVIEW_PATCH_PLIST:-$HOME/Library/LaunchAgents/$LABEL.plist}"
+readonly LOG_DIR="${CURSOR_MARKDOWN_PREVIEW_PATCH_LOG_DIR:-$HOME/Library/Logs/cursor-markdown-preview-patch}"
+readonly SWIFT_SOURCE="$SCRIPT_DIR/runner/CursorMarkdownPreviewPatchEnsure.swift"
+readonly EXECUTABLE_NAME="CursorMarkdownPreviewPatchEnsure"
+readonly BUNDLE_ID="${CURSOR_MARKDOWN_PREVIEW_PATCH_BUNDLE_ID:-com.sidsethi.cursor-markdown-preview-patch.ensure-app}"
+readonly RUNNER_EXECUTABLE="$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME"
+
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+cursor_bundle_id() {
+  defaults read /Applications/Cursor.app/Contents/Info CFBundleIdentifier 2>/dev/null ||
+    printf '%s\n' "com.todesktop.230313mzl4w4u92"
+}
+
+write_info_plist() {
+  local info_plist="$1"
+  local cursor_bundle="$2"
+  /usr/libexec/PlistBuddy -c "Clear dict" "$info_plist" >/dev/null 2>&1 || true
+  /usr/libexec/PlistBuddy -c "Add :CFBundleDevelopmentRegion string en" "$info_plist"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string $EXECUTABLE_NAME" "$info_plist"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $BUNDLE_ID" "$info_plist"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleInfoDictionaryVersion string 6.0" "$info_plist"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleName string Cursor Markdown Preview Patch Ensure" "$info_plist"
+  /usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string APPL" "$info_plist"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0" "$info_plist"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 1" "$info_plist"
+  /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$info_plist"
+  /usr/libexec/PlistBuddy -c "Add :CursorMarkdownPreviewPatchRepo string $SCRIPT_DIR" "$info_plist"
+  /usr/libexec/PlistBuddy -c "Add :CursorMarkdownPreviewPatchEnsure string $SCRIPT_DIR/ensure-patched" "$info_plist"
+  /usr/libexec/PlistBuddy -c "Add :CursorMarkdownPreviewPatchLogDir string $LOG_DIR" "$info_plist"
+  /usr/libexec/PlistBuddy -c "Add :CursorBundleIdentifier string $cursor_bundle" "$info_plist"
+}
+
+write_launch_agent() {
+  local plist="$1"
+  local app_path="$2"
+  local cursor_bundle="$3"
+  /usr/libexec/PlistBuddy -c "Clear dict" "$plist" >/dev/null 2>&1 || true
+  /usr/libexec/PlistBuddy -c "Add :Label string $LABEL" "$plist"
+  /usr/libexec/PlistBuddy -c "Add :ProgramArguments array" "$plist"
+  /usr/libexec/PlistBuddy -c "Add :ProgramArguments:0 string $app_path/Contents/MacOS/$EXECUTABLE_NAME" "$plist"
+  /usr/libexec/PlistBuddy -c "Add :RunAtLoad bool true" "$plist"
+  /usr/libexec/PlistBuddy -c "Add :WatchPaths array" "$plist"
+  /usr/libexec/PlistBuddy -c "Add :WatchPaths:0 string $HOME/Library/Caches/$cursor_bundle.ShipIt" "$plist"
+  /usr/libexec/PlistBuddy -c "Add :WatchPaths:1 string /Applications/Cursor.app" "$plist"
+  /usr/libexec/PlistBuddy -c "Add :StandardOutPath string $LOG_DIR/launchd.log" "$plist"
+  /usr/libexec/PlistBuddy -c "Add :StandardErrorPath string $LOG_DIR/launchd.err.log" "$plist"
+  /usr/libexec/PlistBuddy -c "Add :ThrottleInterval integer 60" "$plist"
+}
+
+main() {
+  [[ -f "$SWIFT_SOURCE" ]] || die "runner source not found: $SWIFT_SOURCE"
+  [[ -x "$SCRIPT_DIR/ensure-patched" ]] || die "ensure-patched is not executable"
+  [[ -x "$SCRIPT_DIR/patch" ]] || die "patch is not executable"
+  command -v swiftc >/dev/null 2>&1 || die "swiftc is required to build the runner app"
+
+  local cursor_bundle
+  cursor_bundle="$(cursor_bundle_id)"
+
+  mkdir -p "$APP_PATH/Contents/MacOS" "$LOG_DIR" "$(dirname "$PLIST_PATH")"
+  if [[ -f "$PLIST_PATH" ]]; then
+    cp -p "$PLIST_PATH" "$PLIST_PATH.backup.$(date '+%Y%m%d-%H%M%S')"
+  fi
+
+  swiftc "$SWIFT_SOURCE" -o "$RUNNER_EXECUTABLE"
+  write_info_plist "$APP_PATH/Contents/Info.plist" "$cursor_bundle"
+  plutil -lint "$APP_PATH/Contents/Info.plist" >/dev/null
+
+  if command -v codesign >/dev/null 2>&1; then
+    codesign --force --sign - "$APP_PATH" >/dev/null
+  fi
+
+  write_launch_agent "$PLIST_PATH" "$APP_PATH" "$cursor_bundle"
+  plutil -lint "$PLIST_PATH" >/dev/null
+
+  launchctl bootout "gui/$(id -u)" "$PLIST_PATH" >/dev/null 2>&1 || true
+  launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
+
+  cat <<EOF
+OK: installed app-backed Cursor patch auto-reapply.
+
+Runner app:
+  $APP_PATH
+
+LaunchAgent:
+  $PLIST_PATH
+
+Next:
+  Open System Settings > Privacy & Security > App Management, then enable:
+  $APP_PATH
+
+  If the runner is not listed yet, run the test command below once. macOS should
+  block the write and add the runner to App Management as a disabled app.
+
+After granting App Management, test with:
+  ./verify-auto-reapply
+EOF
+}
+
+main "$@"
