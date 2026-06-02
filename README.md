@@ -278,11 +278,17 @@ The fold model is visual-only and session-local:
 In the preview, hover a heading to reveal its left-gutter marker, then click the
 marker to fold or unfold that section. The marker is positioned outside the
 normal text column, so headings do not shift horizontally when controls appear.
+Only headings with content get a fold marker or participate in bulk fold
+actions. Empty heading sections are left unmarked, and collapsed non-empty
+headings keep their `+` marker visible as a lightweight indicator that hidden
+content exists.
+
 The injected toolbar supports:
 
 - `Fold all`
 - `Unfold all`
 - `Fold to current`
+- `Unfold current`
 - `Fold to H2`
 - `Fold to H3`
 - `Fold to H4`
@@ -297,7 +303,9 @@ sticky positioning. In both cases it stays outside `.tiptap.ProseMirror`.
 heading section, then folds peer and descendant headings at that heading level
 while keeping the current section open. Other bulk folding actions also skip any
 section that contains the active selection, so the caret is not stranded in
-hidden content.
+hidden content. `Unfold current` uses the same current-heading lookup, then
+unfolds that heading and every descendant heading inside it without unfolding
+peer sections.
 
 A real Command Palette integration is deliberately deferred because the current
 `custom.js` injection does not have a proven low-risk command registration bridge
@@ -445,6 +453,34 @@ Pinned toolbar verification was run later on 2026-06-02:
     scrolled underneath it
 - Live backup from that apply:
   `$HOME/Library/Application Support/Cursor/workbench-patch-backups/cursor-app-20260602-142509/workbench.html`
+
+`Unfold current` and empty-heading verification was run later on 2026-06-02:
+
+- `node --check custom.js`: passed
+- `bash tests/heading-folding-browser-fixture.sh`: passed
+- `./test.sh`: 24 passed, 0 failed
+- `git diff --check`: passed
+- `./patch`: applied to the live Cursor app bundle
+- Browser fixture coverage includes:
+  - `Unfold current` reopens the current heading section and descendant
+    headings without reopening peer sections
+  - empty heading sections do not receive generated marker rules
+  - bulk fold actions ignore empty heading sections
+  - collapsed non-empty headings keep a visible `+` marker
+- Computer Use live UI check:
+  - reloaded and reused the existing Cursor window instead of opening a new one
+  - created a temporary Markdown file with an empty H2, contentful H2 siblings,
+    and a nested H3
+  - confirmed `Fold to H2` left the empty H2 unmarked while collapsed
+    contentful H2 sections showed persistent `+` markers
+  - confirmed clicking the empty H2 gutter did not toggle any fold state
+  - confirmed `Unfold current` reopened a folded contentful section and its
+    nested H3 while leaving the trailing sibling folded
+  - confirmed selecting the parent H1 intro area and running `Unfold current`
+    reopened all descendant headings under that H1
+  - removed the temporary Markdown file after the live check
+- Live backup from that apply:
+  `$HOME/Library/Application Support/Cursor/workbench-patch-backups/cursor-app-20260602-144146/workbench.html`
 
 A previous local app-bundle selector preflight was run on 2026-05-21. The live
 Cursor app was not modified during that preflight:

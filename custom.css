@@ -167,7 +167,7 @@
   font-weight: 500;
   left: 0.15em;
   line-height: 1;
-  opacity: 0;
+  opacity: var(--cursor-md-heading-fold-marker-opacity, 0);
   pointer-events: auto;
   position: absolute;
   text-align: center;

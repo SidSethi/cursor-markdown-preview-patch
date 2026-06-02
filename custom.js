@@ -736,15 +736,17 @@
     const lines = [];
 
     for (const section of sections.filter((entry) => entry.hasContent)) {
-      const marker = state.collapsed.has(section.key) ? "+" : "-";
+      const isCollapsed = state.collapsed.has(section.key);
+      const marker = isCollapsed ? "+" : "-";
+      const markerOpacity = isCollapsed ? "0.85" : "0";
       lines.push(
         `${buildRuleSelector(
           rootSelectors,
           `> :nth-child(${section.headingChildNumber})`
-        )} { --cursor-md-heading-fold-marker: "${marker}"; }`
+        )} { --cursor-md-heading-fold-marker: "${marker}"; --cursor-md-heading-fold-marker-opacity: ${markerOpacity}; }`
       );
 
-      if (state.collapsed.has(section.key)) {
+      if (isCollapsed) {
         lines.push(
           `${buildRuleSelector(
             rootSelectors,
@@ -794,6 +796,7 @@
       ["fold-all", "", "Fold all"],
       ["unfold-all", "", "Unfold all"],
       ["fold-to-current", "", "Fold to current"],
+      ["unfold-current", "", "Unfold current"],
       ["fold-to-level", "2", "Fold to H2"],
       ["fold-to-level", "3", "Fold to H3"],
       ["fold-to-level", "4", "Fold to H4"],
@@ -989,6 +992,25 @@
       for (const section of foldableSections) {
         if (!selectionIntersectsSectionContent(container, section)) {
           state.collapsed.add(section.key);
+        }
+      }
+      updateHeadingFolds(container, sections, state);
+      return;
+    }
+
+    if (action === "unfold-current") {
+      const currentSection = getCurrentHeadingSection(container, sections);
+      if (!currentSection) {
+        return;
+      }
+
+      state.collapsed.delete(currentSection.key);
+      for (const section of sections) {
+        if (
+          section.headingChildIndex > currentSection.headingChildIndex &&
+          section.headingChildIndex <= currentSection.contentEndIndex
+        ) {
+          state.collapsed.delete(section.key);
         }
       }
       updateHeadingFolds(container, sections, state);

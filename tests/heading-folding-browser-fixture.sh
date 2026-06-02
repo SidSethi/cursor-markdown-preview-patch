@@ -95,6 +95,16 @@ cat > "$tmp/fixture.html" <<HTML
       </div>
     </div>
 
+    <div id="empty-heading-fixture" class="markdown-editor-react__richtext-content">
+      <div class="tiptap ProseMirror" contenteditable="true">
+        <h1>Empty Test</h1>
+        <p>Intro</p>
+        <h2>Empty Child</h2>
+        <h2>Full Child</h2>
+        <p>Full child body</p>
+      </div>
+    </div>
+
     <div id="same-tag-fixture" class="markdown-editor-react__richtext-content">
       <div class="tiptap ProseMirror" contenteditable="true">
         <h1 aria-level="1" style="font-size: 32px">Visual One</h1>
@@ -167,6 +177,7 @@ cat > "$tmp/fixture.html" <<HTML
     for (const id of [
       "fixture",
       "frontmatter-fixture",
+      "empty-heading-fixture",
       "same-tag-fixture",
       "promoted-toolbar-fixture",
       "fallback-fixture",
@@ -283,6 +294,12 @@ cat > "$tmp/fixture.html" <<HTML
             "fold to current toolbar button created"
           );
           assert(
+            !!toolbar.querySelector(
+              'button[data-cursor-md-fold-action="unfold-current"]'
+            ),
+            "unfold current toolbar button created"
+          );
+          assert(
             !style.textContent.includes("padding-left"),
             "heading marker CSS does not shift heading text"
           );
@@ -324,11 +341,16 @@ cat > "$tmp/fixture.html" <<HTML
               'button[data-cursor-md-fold-action="fold-to-level"][data-cursor-md-fold-level="2"]'
             )
             .click();
+          const foldToH2Css = getOwnedStyle(container).textContent;
           assert(
-            getOwnedStyle(container).textContent.includes(
-              ":nth-child(n + 4):nth-child(-n + 6)"
-            ),
+            foldToH2Css.includes(":nth-child(n + 4):nth-child(-n + 6)"),
             "fold to H2 folds first H2 section"
+          );
+          assert(
+            foldToH2Css.includes(
+              '--cursor-md-heading-fold-marker: "+"; --cursor-md-heading-fold-marker-opacity: 0.85'
+            ),
+            "collapsed headings keep visible plus marker"
           );
 
           toolbar
@@ -358,6 +380,39 @@ cat > "$tmp/fixture.html" <<HTML
           toolbar
             .querySelector('button[data-cursor-md-fold-action="unfold-all"]')
             .click();
+
+          selection.removeAllRanges();
+          toolbar
+            .querySelector('button[data-cursor-md-fold-action="fold-all"]')
+            .click();
+          assert(
+            getOwnedStyle(container).textContent.includes(
+              ":nth-child(n + 2):nth-child(-n + 8)"
+            ),
+            "fold all collapses top-level section when selection is clear"
+          );
+          clickHeadingGutter(root.children[0]);
+          assert(
+            !getOwnedStyle(container).textContent.includes(
+              ":nth-child(n + 2):nth-child(-n + 8)"
+            ) &&
+              getOwnedStyle(container).textContent.includes(
+                ":nth-child(n + 4):nth-child(-n + 6)"
+              ),
+            "opening parent section leaves nested headings folded"
+          );
+          range.selectNodeContents(root.children[1]);
+          range.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          toolbar
+            .querySelector('button[data-cursor-md-fold-action="unfold-current"]')
+            .click();
+          assert(
+            !getOwnedStyle(container).textContent.includes("display: none"),
+            "unfold current clears current section and descendant folds"
+          );
+          selection.removeAllRanges();
 
           range.selectNodeContents(root.children[1]);
           range.collapse(true);
@@ -393,6 +448,47 @@ cat > "$tmp/fixture.html" <<HTML
             "frontmatter source heading excluded from heading folds"
           );
           assertChildrenUnmutated("frontmatter-fixture");
+
+          const emptyContainer =
+            document.getElementById("empty-heading-fixture");
+          const emptyRoot =
+            emptyContainer.querySelector(".tiptap.ProseMirror");
+          const emptySections = hooks.getHeadingSections(emptyContainer);
+          assert(
+            emptySections.length === 3,
+            "empty-heading fixture detects three heading sections"
+          );
+          assert(
+            emptySections[1].text === "Empty Child" &&
+              emptySections[1].hasContent === false,
+            "empty heading section is not foldable"
+          );
+          const emptyToolbar = getOwnedToolbar(emptyContainer);
+          const emptyStyle = getOwnedStyle(emptyContainer);
+          assert(!!emptyToolbar, "empty-heading toolbar created");
+          assert(!!emptyStyle, "empty-heading style created");
+          assert(
+            !emptyStyle.textContent.includes("> :nth-child(3)"),
+            "empty heading has no fold marker rule"
+          );
+          const beforeEmptyClickCss = emptyStyle.textContent;
+          clickHeadingGutter(emptyRoot.children[2]);
+          assert(
+            getOwnedStyle(emptyContainer).textContent === beforeEmptyClickCss,
+            "clicking empty heading gutter does not fold"
+          );
+          emptyToolbar
+            .querySelector(
+              'button[data-cursor-md-fold-action="fold-to-level"][data-cursor-md-fold-level="2"]'
+            )
+            .click();
+          const emptyFoldCss = getOwnedStyle(emptyContainer).textContent;
+          assert(
+            emptyFoldCss.includes(":nth-child(n + 5):nth-child(-n + 5)") &&
+              !emptyFoldCss.includes("> :nth-child(3)"),
+            "fold to H2 ignores empty heading and folds only contentful peer"
+          );
+          assertChildrenUnmutated("empty-heading-fixture");
 
           const sameTagContainer =
             document.getElementById("same-tag-fixture");

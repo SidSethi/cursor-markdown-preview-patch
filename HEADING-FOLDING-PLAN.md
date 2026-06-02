@@ -13,6 +13,8 @@
 | ProseMirror children | Never wrap, reorder, annotate, or style inline from JavaScript |
 | Fold state | Keep ephemeral per preview container at first |
 | Fold to current | Implement as in-preview toolbar action, not Command Palette |
+| Unfold current | Implement as in-preview toolbar action for current section and descendants |
+| Empty sections | Do not make empty heading sections foldable |
 | Toolbar placement | Promote above the preview scroll host when Cursor's mode-toggle host is detectable; otherwise use sticky fallback |
 | Live Cursor writes | Only after explicit user approval |
 | Verification | Fixture-first, then optional live runtime inspection |
@@ -29,6 +31,8 @@
   - The current injected script can run in the workbench page, but does not have a proven command-registration API.
   - Patching `workbench.desktop.main.js` to register commands would be much more brittle than the current `workbench.html` injection.
 - The implemented toolbar includes `Fold to current` because selection-to-parent-heading mapping was proven in fixture and live checks without command registration.
+- The implemented toolbar includes `Unfold current` so a user can reopen a parent section and then clear all nested folds inside it without touching peer sections.
+- Empty heading sections are not foldable; collapsed non-empty headings keep their `+` marker visible so hidden content is obvious.
 - The implemented toolbar is promoted outside the preview scroll host when Cursor's surrounding `Preview | Markdown` host is detectable, so the fold controls remain visible while the document body scrolls.
 
 ---
@@ -207,6 +211,7 @@
   - Fold all
   - Unfold all
   - Fold to current
+  - Unfold current
   - Fold to level 2
   - Fold to level 3
   - Fold to level 4
@@ -312,6 +317,7 @@
   - fold all
   - unfold all
   - fold to current
+  - unfold current
   - fold to level 2
   - fold to level 3
   - fold to level 4
@@ -325,6 +331,8 @@
 - [ ] **5.4** Avoid layout shifts beyond the heading gutter padding.
 - [ ] **5.5** Hide heading gutter markers until hover/focus.
 - [ ] **5.6** Keep toolbar available while scrolling through long preview documents.
+- [ ] **5.7** Keep collapsed non-empty heading markers visible.
+- [ ] **5.8** Do not show fold markers for empty heading sections.
 
 **6a - Update fixture tests**
 
@@ -351,6 +359,7 @@
   - fold to current
   - same-tag visual heading level fallback
   - toolbar promotion outside the preview scroll host
+  - empty heading sections stay unmarked and uncollapsed by bulk actions
 
 **7a - Optional live verification after explicit approval**
 
@@ -403,6 +412,7 @@
   - click gutter toggles only that section
   - fold all skips active selection ranges or handles them safely
   - fold to current keeps the active section open and folds peer sections
+  - unfold current clears current-section and descendant folds only
   - unfold all restores every hidden range
 - [ ] Toolbar placement:
   - toolbar exists outside ProseMirror
@@ -446,8 +456,12 @@
   - unfold all
   - fold to level
   - fold to current
+  - unfold current
 - Fold toolbar remains available while scrolling long previews.
-- Heading gutter markers remain outside the text column and hidden until hover/focus.
+- Heading gutter markers remain outside the text column; expanded markers stay
+  hidden until hover/focus, while collapsed markers remain visible.
+- Empty heading sections have no fold marker and are ignored by bulk fold
+  actions.
 - Fixture tests pass.
 - `node --check custom.js` passes.
 - `./test.sh` passes.
