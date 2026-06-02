@@ -1,7 +1,8 @@
 # Agent Notes
 
 This repo patches Cursor's installed app bundle so its native editable Markdown
-preview can use custom CSS and a small JavaScript frontmatter renderer.
+preview can use custom CSS, a small JavaScript frontmatter renderer, and visual
+heading folding.
 
 For user-facing purpose, usage, caveats, file inventory, rollback behavior, and
 version notes, read `README.md`. Keep this file focused on how agents should work
@@ -11,8 +12,8 @@ in the repo.
 
 - `README.md` is the canonical project documentation.
 - `patch`, `rollback`, `ensure-patched`, `install-auto-reapply`,
-  `verify-auto-reapply`, `custom.css`, `custom.js`, `runner/`, `launchd/`, and
-  `test.sh` are the live implementation surface.
+  `verify-auto-reapply`, `custom.css`, `custom.js`, `runner/`, `launchd/`,
+  `tests/`, and `test.sh` are the live implementation surface.
 - `ARCHIVE-2026-05-14-frontmatter-rendering-postmortem.md` is historical
   context only.
 - `AUTO-REAPPLY.md` is the auto-reapply design and verification runbook.
@@ -42,11 +43,15 @@ in the repo.
 - Keep `custom.js` as a same-origin asset loaded from `workbench.html`; Cursor's
   CSP blocks inline script injection.
 - Avoid mutating Cursor's ProseMirror document nodes. The intended model is:
-  detect frontmatter, insert display-only UI outside the editable subtree, and
-  use CSS for visual folding.
+  detect frontmatter and headings, insert generated UI outside the editable
+  subtree, and use CSS for visual folding.
+- Heading-folding controls and generated styles should stay outside
+  `.tiptap.ProseMirror`; the toolbar may be promoted into Cursor's surrounding
+  `Preview | Markdown` host when that non-scrolling host is detected.
 - Keep `patch` and `rollback` idempotent and backup-aware.
 - Update fixture tests when changing markers, injected asset names, backup
-  behavior, font-size rendering, or frontmatter detection.
+  behavior, font-size rendering, frontmatter detection, heading-folding ranges,
+  or heading-folding toolbar placement.
 - Update `./verify-auto-reapply` when changing LaunchAgent labels, runner app
   paths, managed markers, or the auto-reapply install flow.
 

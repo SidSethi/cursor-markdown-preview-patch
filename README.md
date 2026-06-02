@@ -2,7 +2,7 @@
 
 Cursor's native editable rendered Markdown preview does not currently allow custom styling or frontmatter rendering. This repo is a small unsupported workaround: it patches Cursor's installed app bundle, injects custom CSS into `workbench.html`, and installs a same-origin JavaScript renderer next to `workbench.html`.
 
-It targets Cursor's private `.markdown-editor-react__richtext-content` DOM, which is used by the native `Preview | Markdown` editor surface. The current patch combines CSS typography/layout changes with JavaScript frontmatter detection so leading YAML frontmatter renders as a compact metadata table inspired by GitHub's Markdown preview.
+It targets Cursor's private `.markdown-editor-react__richtext-content` DOM, which is used by the native `Preview | Markdown` editor surface. The current patch combines CSS typography/layout changes with JavaScript frontmatter detection so leading YAML frontmatter renders as a compact metadata table inspired by GitHub's Markdown preview, and normal Markdown headings can be visually folded from the editable preview.
 
 ## Why this matters
 
@@ -29,7 +29,7 @@ cursor-inline-markdown-preview-patch
 
 To see changes, reload Cursor with `Developer: Reload Window` or restart Cursor.
 
-By default, the script sets the preview base font size to match Cursor's current `editor.fontSize`. Edit `custom.css` for styling changes, edit `custom.js` for frontmatter detection/rendering changes, then re-run `./patch` and reload Cursor.
+By default, the script sets the preview base font size to match Cursor's current `editor.fontSize`. Edit `custom.css` for styling changes, edit `custom.js` for frontmatter or heading-folding behavior changes, then re-run `./patch` and reload Cursor.
 
 You can choose how the font-size variable is rendered:
 
@@ -186,9 +186,9 @@ cursor-inline-markdown-preview-rollback
 - `launchd/`
   - Example app-backed per-user LaunchAgent plist for macOS auto-reapply.
 - `custom.css`
-  - CSS source for Cursor's editable rendered Markdown preview and rendered frontmatter table.
+  - CSS source for Cursor's editable rendered Markdown preview, rendered frontmatter table, and heading-folding controls.
 - `custom.js`
-  - JavaScript source that recognizes leading YAML frontmatter in Cursor's rendered Markdown DOM and replaces the raw render with a compact metadata table.
+  - JavaScript source that recognizes leading YAML frontmatter in Cursor's rendered Markdown DOM, replaces the raw render with a compact metadata table, and adds visual heading folding in the editable Markdown preview.
 - `test.sh`
   - Fixture smoke tests for the patch and rollback scripts.
 
@@ -204,6 +204,7 @@ cursor-inline-markdown-preview-rollback
 - The LaunchAgent auto-reapply flow is macOS-specific and still modifies
   Cursor's unsupported app-bundle internals.
 - The frontmatter renderer is intentionally conservative: JavaScript detects and inserts the display table, while CSS does the visual folding of Cursor's raw frontmatter render.
+- Heading folding is also intentionally conservative: generated controls and generated styles live outside Cursor's editable ProseMirror subtree. The current implementation provides in-preview controls only; it does not add real Command Palette commands.
 
 ## How it works
 
@@ -215,11 +216,11 @@ The script inserts a managed block before `</html>` in Cursor's workbench file:
 <style>
 ...
 </style>
-<script src="./cursor-markdown-preview-patch.js"></script>
+<script src="./cursor-markdown-preview-patch.js?v=YYYYMMDD-HHMMSS"></script>
 <!-- !! VSCODE-CUSTOM-CSS-END !! -->
 ```
 
-The script removes any previous managed block before writing a new one, so it is safe to rerun after editing `custom.css`, editing `custom.js`, or after Cursor updates.
+The script removes any previous managed block before writing a new one, so it is safe to rerun after editing `custom.css`, editing `custom.js`, or after Cursor updates. The query string is a cache buster so an existing Cursor renderer reloads the current JS asset after a live reapply.
 
 `custom.css` stays valid CSS. Instead of using invalid template tokens, `patch` can rewrite this custom property in the temporary injected copy:
 
@@ -256,6 +257,57 @@ metadata:
 renders as rows for `name`, `description`, and
 `metadata.short-description`. The replacement table is `contenteditable=false`
 so normal document editing stays focused on the Markdown body.
+
+### Heading folding
+
+`custom.js` also watches headings in Cursor's native editable Markdown preview.
+For each direct heading child inside the editable ProseMirror document, it
+derives the section range from that heading to the next heading of the same or
+shallower level. The level resolver prefers real heading semantics, then falls
+back to common rich-text level hints and computed heading size if Cursor changes
+the rendered DOM shape.
+
+The fold model is visual-only and session-local:
+
+- It stores fold state in memory for the current preview container.
+- It adds generated fold controls outside `.tiptap.ProseMirror`.
+- It writes generated CSS outside `.tiptap.ProseMirror`.
+- It does not wrap, reorder, add classes to, or add inline styles to ProseMirror
+  document children.
+
+In the preview, hover a heading to reveal its left-gutter marker, then click the
+marker to fold or unfold that section. The marker is positioned outside the
+normal text column, so headings do not shift horizontally when controls appear.
+The injected toolbar supports:
+
+- `Fold all`
+- `Unfold all`
+- `Fold to current`
+- `Fold to H2`
+- `Fold to H3`
+- `Fold to H4`
+
+When Cursor exposes the surrounding `Preview | Markdown` mode-toggle host, the
+toolbar is promoted just above the preview scroll container so it remains
+available while scrolling through a long Markdown file. If that host shape is
+not detected, the toolbar falls back to the original generated-control host with
+sticky positioning. In both cases it stays outside `.tiptap.ProseMirror`.
+
+`Fold to current` uses the active caret or selection to find the nearest parent
+heading section, then folds peer and descendant headings at that heading level
+while keeping the current section open. Other bulk folding actions also skip any
+section that contains the active selection, so the caret is not stranded in
+hidden content.
+
+A real Command Palette integration is deliberately deferred because the current
+`custom.js` injection does not have a proven low-risk command registration bridge
+into Cursor's workbench.
+
+If the toolbar does not appear in an already-open Cursor window after reapplying
+the patch, open the Markdown file in a fresh Cursor window or fully restart
+Cursor. The injected script URL includes a timestamp query string to avoid stale
+renderer cache, but an existing workbench window can still keep old runtime
+state until it is actually restarted.
 
 ## Rollback and backups
 
@@ -307,6 +359,92 @@ Verification was last run locally against this checkout on 2026-05-26:
 - `./verify-auto-reapply`: passed
 - `shellcheck patch rollback ensure-patched install-auto-reapply verify-auto-reapply test.sh`: passed
 - `swiftc -parse runner/CursorMarkdownPreviewPatchEnsure.swift`: passed
+
+Additional heading-folding verification was run on 2026-06-02:
+
+- `./test.sh`: 24 passed, 0 failed
+- `./patch`: applied to the live Cursor app bundle
+- Live bundle marker check: `cursorMarkdownPreviewHeadingFolds`,
+  `cursor-md-heading-fold`, `Fold to H2`, and
+  `cursorMarkdownPreviewFrontmatter` present in the installed workbench asset
+- Computer Use live UI check:
+  - opened a temporary Markdown file in a separate Cursor window
+  - switched to native `Preview | Markdown`
+  - confirmed the `Fold all`, `Unfold all`, `Fold to H2`, `Fold to H3`, and
+    `Fold to H4` toolbar rendered
+  - confirmed `Fold all`, `Unfold all`, `Fold to H2`, `Fold to H3`, and
+    direct heading-gutter toggles changed visible preview sections correctly
+- Live backup from that apply:
+  `$HOME/Library/Application Support/Cursor/workbench-patch-backups/cursor-app-20260602-122651/workbench.html`
+
+The 2026-06-02 live run did not run `./rollback` or
+`./verify-auto-reapply`. Cursor displayed its standard corrupt-installation
+warning after the app-bundle modification.
+
+Follow-up verification on 2026-06-02 found that an already-open workspace
+preview did not show the toolbar even though a fresh file window did. The fix
+expanded detection to fallback `.tiptap.ProseMirror` preview roots, added a
+timestamp query string to the injected script URL, and added a browser fixture
+for that fallback shape.
+
+- `./test.sh`: 24 passed, 0 failed
+- Live bundle marker check: installed `workbench.html` used
+  `cursor-markdown-preview-patch.js?v=20260602-131005`
+- Computer Use live UI check:
+  - reopened `REDDIT-BOOKMARK-INGESTION-DESIGN.md` in a fresh Cursor window
+  - confirmed the heading-fold toolbar rendered
+  - confirmed `Fold all`, `Unfold all`, and heading markers changed visible
+    preview sections correctly
+- Live backup from that apply:
+  `$HOME/Library/Application Support/Cursor/workbench-patch-backups/cursor-app-20260602-131005/workbench.html`
+
+Heading-folding UI polish verification was run later on 2026-06-02:
+
+- `node --check custom.js`: passed
+- `bash tests/heading-folding-browser-fixture.sh`: passed
+- `./test.sh`: 24 passed, 0 failed
+- `git diff --check`: passed
+- `./patch`: applied to the live Cursor app bundle
+- Browser fixture coverage includes:
+  - gutter marker CSS does not inject generated padding into per-heading rules
+  - direct heading-gutter clicks survive rerender when generated marker text
+    appears in `innerText`
+  - same-tag heading DOM with misleading `aria-level` values still resolves
+    nested visual heading levels
+  - `Fold to current` keeps the active section open while folding peer sections
+- Computer Use live UI check:
+  - opened `README.md` in Cursor's native `Preview | Markdown` surface
+  - confirmed heading text alignment did not shift when the gutter marker
+    appeared
+  - confirmed the gutter marker is hidden until heading hover/focus
+  - confirmed H1 and H2 gutter toggles changed visible preview sections
+    correctly
+  - confirmed `Fold to current` used the active `Usage` section and folded peer
+    H2 sections while keeping `Usage` open
+- Live backup from that apply:
+  `$HOME/Library/Application Support/Cursor/workbench-patch-backups/cursor-app-20260602-133910/workbench.html`
+
+Pinned toolbar verification was run later on 2026-06-02:
+
+- `node --check custom.js`: passed
+- `bash tests/heading-folding-browser-fixture.sh`: passed
+- `./test.sh`: 24 passed, 0 failed
+- `git diff --check`: passed
+- `./patch`: applied to the live Cursor app bundle
+- Browser fixture coverage includes:
+  - the toolbar computes as sticky in the fallback generated-control host
+  - the toolbar is promoted below Cursor's `Preview` and `Markdown` controls
+    when that non-scrolling mode-toggle host is detectable
+  - the promoted toolbar stays outside the preview scroll host and outside
+    `.tiptap.ProseMirror`
+- Computer Use live UI check:
+  - reloaded the existing Cursor window instead of opening a new one
+  - scrolled `REDDIT-BOOKMARK-INGESTION-DESIGN.md` in Cursor's native
+    `Preview | Markdown` surface
+  - confirmed the fold toolbar remained visible while the document body
+    scrolled underneath it
+- Live backup from that apply:
+  `$HOME/Library/Application Support/Cursor/workbench-patch-backups/cursor-app-20260602-142509/workbench.html`
 
 A previous local app-bundle selector preflight was run on 2026-05-21. The live
 Cursor app was not modified during that preflight:

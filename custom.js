@@ -1,28 +1,66 @@
 /*
- * Cursor editable rendered Markdown preview frontmatter renderer.
+ * Cursor editable rendered Markdown preview enhancements.
  *
  * The native editable preview renders a leading YAML block as normal Markdown.
  * This script recognizes that rendered shape, hides the raw nodes, and inserts a
  * compact metadata table inspired by GitHub's Markdown preview.
+ *
+ * It also adds conservative heading folding for the same editable preview. Fold
+ * controls and generated styles live outside the editable ProseMirror subtree.
  */
 (() => {
-  const cursorMarkdownPreviewFrontmatter = {
+  const cursorMarkdownPreviewPatch = {
     contentSelector: ".markdown-editor-react__richtext-content",
-    tableClass: "cursor-md-frontmatter",
-    signatureAttribute: "data-cursor-md-frontmatter-signature",
+    editorRootSelector: ".tiptap.ProseMirror",
+    frontmatter: {
+      tableClass: "cursor-md-frontmatter",
+      signatureAttribute: "data-cursor-md-frontmatter-signature",
+    },
+    headingFolding: {
+      toolbarClass: "cursor-md-heading-fold-toolbar",
+      styleClass: "cursor-md-heading-fold-style",
+      hasFoldsClass: "cursor-md-has-heading-folds",
+      rootAttribute: "data-cursor-md-fold-root",
+      toolbarForAttribute: "data-cursor-md-fold-toolbar-for",
+      styleForAttribute: "data-cursor-md-fold-style-for",
+      actionAttribute: "data-cursor-md-fold-action",
+      levelAttribute: "data-cursor-md-fold-level",
+    },
   };
 
-  const {
-    contentSelector,
-    tableClass,
-    signatureAttribute,
-  } = cursorMarkdownPreviewFrontmatter;
+  const cursorMarkdownPreviewFrontmatter =
+    cursorMarkdownPreviewPatch.frontmatter;
+  const cursorMarkdownPreviewHeadingFolds =
+    cursorMarkdownPreviewPatch.headingFolding;
 
-  const normalizeText = (node) =>
-    (node?.innerText || node?.textContent || "")
+  const { contentSelector, editorRootSelector } = cursorMarkdownPreviewPatch;
+  const { tableClass, signatureAttribute } = cursorMarkdownPreviewFrontmatter;
+  const {
+    actionAttribute,
+    hasFoldsClass,
+    levelAttribute,
+    rootAttribute,
+    styleClass,
+    styleForAttribute,
+    toolbarClass,
+    toolbarForAttribute,
+  } = cursorMarkdownPreviewHeadingFolds;
+
+  const frontmatterSourcesByContainer = new WeakMap();
+  const foldStatesByContainer = new WeakMap();
+  const containersByFoldRootId = new Map();
+  let nextFoldRootId = 1;
+
+  const normalizeString = (value) =>
+    (value || "")
       .replace(/\u00a0/g, " ")
       .replace(/[ \t]+\n/g, "\n")
       .trim();
+
+  const normalizeText = (node) =>
+    normalizeString(node?.innerText || node?.textContent || "");
+
+  const normalizeDomText = (node) => normalizeString(node?.textContent || "");
 
   const isHorizontalRule = (node) => {
     if (!node) {
@@ -32,7 +70,182 @@
     return node.tagName === "HR" || normalizeText(node) === "---";
   };
 
-  const isHeading = (node) => /^H[1-6]$/.test(node?.tagName || "");
+  const headingSelector = "h1,h2,h3,h4,h5,h6,[role='heading']";
+
+  const readHeadingLevelAttribute = (node) => {
+    const attributeNames = [
+      "aria-level",
+      "data-level",
+      "data-heading-level",
+      "data-heading",
+      "level",
+    ];
+
+    for (const name of attributeNames) {
+      const value = Number(node?.getAttribute?.(name));
+      if (Number.isInteger(value) && value >= 1 && value <= 6) {
+        return value;
+      }
+    }
+
+    return 0;
+  };
+
+  const readHeadingLevelClass = (node) => {
+    const classText = Array.from(node?.classList || []).join(" ");
+    const match = classText.match(
+      /(?:^|[\s:_-])(?:h|heading|header|level|cm-header)([1-6])(?:$|[\s:_-])/i
+    );
+    return match ? Number(match[1]) : 0;
+  };
+
+  const headingTagLevel = (node) => {
+    const match = (node?.tagName || "").match(/^H([1-6])$/i);
+    return match ? Number(match[1]) : 0;
+  };
+
+  const explicitHeadingLevel = (node) =>
+    readHeadingLevelAttribute(node) || readHeadingLevelClass(node);
+
+  const isHeading = (node) =>
+    !!node &&
+    (headingTagLevel(node) > 0 ||
+      node.getAttribute?.("role") === "heading" ||
+      explicitHeadingLevel(node) > 0);
+
+  const getVisualHeadingLevels = (headings) => {
+    const fontSizes = headings.map((heading) => {
+      const fontSize =
+        parseFloat(window.getComputedStyle?.(heading)?.fontSize || "0") || 0;
+      return Math.round(fontSize * 100) / 100;
+    });
+    const uniqueSizes = Array.from(new Set(fontSizes.filter((size) => size > 0)))
+      .sort((left, right) => right - left)
+      .slice(0, 6);
+
+    if (uniqueSizes.length <= 1) {
+      return new Map();
+    }
+
+    return new Map(
+      headings.map((heading, index) => [
+        heading,
+        Math.max(1, uniqueSizes.indexOf(fontSizes[index]) + 1),
+      ])
+    );
+  };
+
+  const getHeadingLevelResolver = (children, frontmatterSources) => {
+    const headings = children.filter(
+      (child) => isHeading(child) && !frontmatterSources.has(child)
+    );
+    const explicitLevels = new Map();
+
+    for (const heading of headings) {
+      const level = explicitHeadingLevel(heading);
+      if (level) {
+        explicitLevels.set(heading, level);
+      }
+    }
+
+    const uniqueExplicitLevels = new Set(explicitLevels.values());
+    const tagLevels = new Set(
+      headings.map(headingTagLevel).filter((level) => level > 0)
+    );
+    const visualLevels =
+      tagLevels.size <= 1 ? getVisualHeadingLevels(headings) : new Map();
+
+    if (uniqueExplicitLevels.size > 1) {
+      return (heading) =>
+        explicitLevels.get(heading) || headingTagLevel(heading) || 6;
+    }
+
+    if (tagLevels.size > 1) {
+      return (heading) =>
+        headingTagLevel(heading) || explicitLevels.get(heading) || 6;
+    }
+
+    if (visualLevels.size > 0) {
+      return (heading) =>
+        visualLevels.get(heading) ||
+        explicitLevels.get(heading) ||
+        headingTagLevel(heading) ||
+        6;
+    }
+
+    return (heading) => explicitLevels.get(heading) || headingTagLevel(heading) || 6;
+  };
+
+  const getRenderHost = (container) => container.parentElement || container;
+
+  const hasPreviewMarkdownModeButtons = (element) => {
+    if (!element) {
+      return false;
+    }
+
+    const buttonTexts = Array.from(element.querySelectorAll("button")).map(
+      (button) => normalizeDomText(button)
+    );
+    return buttonTexts.includes("Preview") && buttonTexts.includes("Markdown");
+  };
+
+  const getHeadingFoldToolbarHost = (container) => {
+    const renderHost = getRenderHost(container);
+    const parent = renderHost.parentElement;
+
+    if (parent && parent !== document.body && hasPreviewMarkdownModeButtons(parent)) {
+      return parent;
+    }
+
+    return renderHost;
+  };
+
+  const getHeadingFoldToolbarReference = (container, toolbarHost) => {
+    const renderHost = getRenderHost(container);
+    return toolbarHost === renderHost ? container : renderHost;
+  };
+
+  const getEditorRoot = (container) => {
+    if (container?.classList?.contains("ProseMirror")) {
+      return container;
+    }
+
+    return container?.querySelector?.(editorRootSelector) || null;
+  };
+
+  const getEditorChildren = (container) => {
+    const editorRoot = getEditorRoot(container);
+    return editorRoot ? Array.from(editorRoot.children) : [];
+  };
+
+  const hasMarkdownPreviewShape = (container) => {
+    const editorRoot = getEditorRoot(container);
+    if (!editorRoot) {
+      return false;
+    }
+
+    return Array.from(editorRoot.children).some(
+      (child) => isHeading(child) || isHorizontalRule(child)
+    );
+  };
+
+  const getContainerForEditorRoot = (editorRoot) =>
+    editorRoot.closest(contentSelector) || editorRoot.parentElement || editorRoot;
+
+  const getPreviewContainer = (node) => {
+    const contentContainer = node?.closest?.(contentSelector);
+    if (contentContainer) {
+      return contentContainer;
+    }
+
+    const editorRoot = node?.closest?.(editorRootSelector);
+    if (!editorRoot) {
+      return null;
+    }
+
+    const container = getContainerForEditorRoot(editorRoot);
+    return hasMarkdownPreviewShape(container) ? container : null;
+  };
 
   const stripQuotes = (value) => {
     const trimmed = value.trim();
@@ -174,13 +387,21 @@
     return rows;
   };
 
-  const getRenderHost = (container) => container.parentElement || container;
-
   const findExistingTable = (container) => {
-    const host = getRenderHost(container);
-    const tables = Array.from(host.children).filter((child) =>
-      child.classList?.contains(tableClass)
-    );
+    const tables = [];
+    let sibling = container.previousElementSibling;
+
+    while (
+      sibling &&
+      (sibling.classList?.contains(tableClass) ||
+        sibling.classList?.contains(toolbarClass) ||
+        sibling.classList?.contains(styleClass))
+    ) {
+      if (sibling.classList?.contains(tableClass)) {
+        tables.push(sibling);
+      }
+      sibling = sibling.previousElementSibling;
+    }
 
     for (const extra of tables.slice(1)) {
       extra.remove();
@@ -190,9 +411,7 @@
   };
 
   const findHeadingCandidate = (container) => {
-    const headings = Array.from(
-      container.querySelectorAll("h1,h2,h3,h4,h5,h6,[role='heading']")
-    );
+    const headings = Array.from(container.querySelectorAll(headingSelector));
 
     for (const heading of headings) {
       if (heading.classList?.contains(tableClass)) {
@@ -231,7 +450,7 @@
       return headingCandidate;
     }
 
-    const children = Array.from(container.children).filter(
+    const children = getEditorChildren(container).filter(
       (child) => !child.classList?.contains(tableClass)
     );
     const startIndex = children.findIndex((child) => isHorizontalRule(child));
@@ -323,17 +542,19 @@
     return section;
   };
 
-  const renderContainer = (container) => {
+  const renderFrontmatter = (container) => {
     const existing = findExistingTable(container);
     const candidate = findFrontmatterCandidate(container);
 
     if (!candidate) {
       container.classList.remove("cursor-md-has-frontmatter");
       existing?.remove();
+      frontmatterSourcesByContainer.delete(container);
       return;
     }
 
     container.classList.add("cursor-md-has-frontmatter");
+    frontmatterSourcesByContainer.set(container, new Set(candidate.sourceNodes));
 
     if (existing?.getAttribute(signatureAttribute) === candidate.signature) {
       return;
@@ -346,10 +567,628 @@
     host.insertBefore(table, container);
   };
 
+  const getFoldState = (container) => {
+    let state = foldStatesByContainer.get(container);
+
+    if (!state) {
+      state = {
+        rootId: `cursor-md-fold-${nextFoldRootId}`,
+        signature: "",
+        collapsed: new Set(),
+        cssText: "",
+      };
+      nextFoldRootId += 1;
+      foldStatesByContainer.set(container, state);
+    }
+
+    return state;
+  };
+
+  const getHeadingSections = (container) => {
+    const editorRoot = getEditorRoot(container);
+    if (!editorRoot) {
+      return [];
+    }
+
+    const children = Array.from(editorRoot.children);
+    const frontmatterSources =
+      frontmatterSourcesByContainer.get(container) || new Set();
+    const sections = [];
+    const resolveHeadingLevel = getHeadingLevelResolver(
+      children,
+      frontmatterSources
+    );
+
+    for (let index = 0; index < children.length; index += 1) {
+      const heading = children[index];
+      if (!isHeading(heading) || frontmatterSources.has(heading)) {
+        continue;
+      }
+
+      const level = resolveHeadingLevel(heading);
+      let endChildIndex = children.length - 1;
+
+      for (let nextIndex = index + 1; nextIndex < children.length; nextIndex += 1) {
+        const candidate = children[nextIndex];
+        if (
+          isHeading(candidate) &&
+          !frontmatterSources.has(candidate) &&
+          resolveHeadingLevel(candidate) <= level
+        ) {
+          endChildIndex = nextIndex - 1;
+          break;
+        }
+      }
+
+      const text = normalizeDomText(heading);
+      sections.push({
+        key: `${index}:${level}:${text}`,
+        heading,
+        level,
+        text,
+        headingChildIndex: index,
+        headingChildNumber: index + 1,
+        contentStartIndex: index + 1,
+        contentEndIndex: endChildIndex,
+        hasContent: endChildIndex > index,
+      });
+    }
+
+    return sections;
+  };
+
+  const getHeadingSignature = (sections) =>
+    sections
+      .map(
+        (section) =>
+          `${section.headingChildIndex}:${section.contentEndIndex}:${section.level}:${section.text}`
+      )
+      .join("\n");
+
+  const findGeneratedElementInHost = (host, className, attribute, value) => {
+    const elements = Array.from(host.children).filter(
+      (child) =>
+        child.classList?.contains(className) &&
+        child.getAttribute(attribute) === value
+    );
+
+    for (const extra of elements.slice(1)) {
+      extra.remove();
+    }
+
+    return elements[0] || null;
+  };
+
+  const findGeneratedElement = (container, className, attribute, value) =>
+    findGeneratedElementInHost(getRenderHost(container), className, attribute, value);
+
+  const findGeneratedToolbar = (container, state) => {
+    const primaryHost = getHeadingFoldToolbarHost(container);
+    const fallbackHost = getRenderHost(container);
+    const hosts =
+      primaryHost === fallbackHost ? [primaryHost] : [primaryHost, fallbackHost];
+    const toolbars = hosts
+      .flatMap((host) => Array.from(host.children))
+      .filter(
+        (child) =>
+          child.classList?.contains(toolbarClass) &&
+          child.getAttribute(toolbarForAttribute) === state.rootId
+      );
+
+    for (const extra of toolbars.slice(1)) {
+      extra.remove();
+    }
+
+    const toolbar = toolbars[0] || null;
+    if (toolbar && toolbar.parentElement !== primaryHost) {
+      toolbar.remove();
+      return null;
+    }
+
+    return toolbar;
+  };
+
+  const removeGeneratedElements = (container, state) => {
+    if (!state) {
+      return;
+    }
+
+    const renderHost = getRenderHost(container);
+    const toolbarHost = getHeadingFoldToolbarHost(container);
+    const hosts = toolbarHost === renderHost ? [renderHost] : [renderHost, toolbarHost];
+
+    for (const child of hosts.flatMap((host) => Array.from(host.children))) {
+      if (
+        (child.classList?.contains(toolbarClass) &&
+          child.getAttribute(toolbarForAttribute) === state.rootId) ||
+        (child.classList?.contains(styleClass) &&
+          child.getAttribute(styleForAttribute) === state.rootId)
+      ) {
+        child.remove();
+      }
+    }
+  };
+
+  const cleanupHeadingFolds = (container) => {
+    const state = foldStatesByContainer.get(container);
+    removeGeneratedElements(container, state);
+
+    if (state) {
+      containersByFoldRootId.delete(state.rootId);
+    }
+
+    container.classList.remove(hasFoldsClass);
+    container.removeAttribute(rootAttribute);
+    foldStatesByContainer.delete(container);
+  };
+
+  const getRootCssSelectors = (rootId) => [
+    `${contentSelector}[${rootAttribute}="${rootId}"] ${editorRootSelector}`,
+    `[${rootAttribute}="${rootId}"] > ${editorRootSelector}`,
+    `${editorRootSelector}[${rootAttribute}="${rootId}"]`,
+  ];
+
+  const buildRuleSelector = (rootSelectors, childSelector) =>
+    rootSelectors.map((rootSelector) => `${rootSelector} ${childSelector}`).join(", ");
+
+  const buildHeadingFoldCss = (state, sections) => {
+    const rootSelectors = getRootCssSelectors(state.rootId);
+    const lines = [];
+
+    for (const section of sections.filter((entry) => entry.hasContent)) {
+      const marker = state.collapsed.has(section.key) ? "+" : "-";
+      lines.push(
+        `${buildRuleSelector(
+          rootSelectors,
+          `> :nth-child(${section.headingChildNumber})`
+        )} { --cursor-md-heading-fold-marker: "${marker}"; }`
+      );
+
+      if (state.collapsed.has(section.key)) {
+        lines.push(
+          `${buildRuleSelector(
+            rootSelectors,
+            `> :nth-child(n + ${section.contentStartIndex + 1}):nth-child(-n + ${
+              section.contentEndIndex + 1
+            })`
+          )} { display: none !important; }`
+        );
+      }
+    }
+
+    return lines.join("\n");
+  };
+
+  const renderHeadingFoldStyle = (container, state, sections) => {
+    const cssText = buildHeadingFoldCss(state, sections);
+    if (state.cssText === cssText) {
+      return;
+    }
+
+    state.cssText = cssText;
+    let style = findGeneratedElement(
+      container,
+      styleClass,
+      styleForAttribute,
+      state.rootId
+    );
+
+    if (!style) {
+      style = document.createElement("style");
+      style.className = styleClass;
+      style.setAttribute(styleForAttribute, state.rootId);
+      getRenderHost(container).insertBefore(style, container);
+    }
+
+    style.textContent = cssText;
+  };
+
+  const buildHeadingFoldToolbar = (state) => {
+    const section = document.createElement("section");
+    section.className = toolbarClass;
+    section.setAttribute("aria-label", "Markdown heading folds");
+    section.setAttribute("contenteditable", "false");
+    section.setAttribute(toolbarForAttribute, state.rootId);
+
+    const actions = [
+      ["fold-all", "", "Fold all"],
+      ["unfold-all", "", "Unfold all"],
+      ["fold-to-current", "", "Fold to current"],
+      ["fold-to-level", "2", "Fold to H2"],
+      ["fold-to-level", "3", "Fold to H3"],
+      ["fold-to-level", "4", "Fold to H4"],
+    ];
+
+    for (const [action, level, label] of actions) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.setAttribute(actionAttribute, action);
+      if (level) {
+        button.setAttribute(levelAttribute, level);
+      }
+      section.append(button);
+    }
+
+    return section;
+  };
+
+  const renderHeadingFoldToolbar = (container, state) => {
+    const existing = findGeneratedToolbar(container, state);
+
+    if (existing) {
+      return;
+    }
+
+    const toolbar = buildHeadingFoldToolbar(state);
+    const toolbarHost = getHeadingFoldToolbarHost(container);
+    toolbarHost.insertBefore(
+      toolbar,
+      getHeadingFoldToolbarReference(container, toolbarHost)
+    );
+  };
+
+  const selectionIntersectsNode = (selection, node) => {
+    if (!selection || selection.rangeCount === 0) {
+      return false;
+    }
+
+    if (node.contains?.(selection.anchorNode) || node.contains?.(selection.focusNode)) {
+      return true;
+    }
+
+    for (let index = 0; index < selection.rangeCount; index += 1) {
+      const range = selection.getRangeAt(index);
+      try {
+        if (range.intersectsNode(node)) {
+          return true;
+        }
+      } catch {
+        // Some Range implementations reject non-text nodes. The anchor/focus
+        // check above still catches collapsed selections inside the node.
+      }
+    }
+
+    return false;
+  };
+
+  const selectionIntersectsSectionContent = (container, section) => {
+    const selection = window.getSelection?.();
+    if (!selection || selection.rangeCount === 0 || !section.hasContent) {
+      return false;
+    }
+
+    const children = getEditorChildren(container);
+    for (
+      let index = section.contentStartIndex;
+      index <= section.contentEndIndex;
+      index += 1
+    ) {
+      if (selectionIntersectsNode(selection, children[index])) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  const getDirectEditorChildForNode = (editorRoot, node) => {
+    let current =
+      node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement || null;
+
+    while (current && current.parentElement !== editorRoot) {
+      current = current.parentElement;
+    }
+
+    return current?.parentElement === editorRoot ? current : null;
+  };
+
+  const getSelectionChildIndex = (container) => {
+    const selection = window.getSelection?.();
+    const editorRoot = getEditorRoot(container);
+    if (!selection || selection.rangeCount === 0 || !editorRoot) {
+      return -1;
+    }
+
+    const children = Array.from(editorRoot.children);
+    const candidateNodes = [selection.focusNode, selection.anchorNode];
+
+    for (const node of candidateNodes) {
+      const child = getDirectEditorChildForNode(editorRoot, node);
+      const childIndex = child ? children.indexOf(child) : -1;
+      if (childIndex >= 0) {
+        return childIndex;
+      }
+    }
+
+    const range = selection.getRangeAt(0);
+    if (
+      range.startContainer === editorRoot &&
+      range.startOffset >= 0 &&
+      range.startOffset < children.length
+    ) {
+      return range.startOffset;
+    }
+
+    return -1;
+  };
+
+  const getCurrentHeadingSection = (container, sections) => {
+    const childIndex = getSelectionChildIndex(container);
+    if (childIndex < 0) {
+      return null;
+    }
+
+    let currentSection = null;
+    for (const section of sections) {
+      if (
+        childIndex >= section.headingChildIndex &&
+        childIndex <= section.contentEndIndex &&
+        (!currentSection ||
+          section.headingChildIndex > currentSection.headingChildIndex)
+      ) {
+        currentSection = section;
+      }
+    }
+
+    return currentSection;
+  };
+
+  const reconcileFoldState = (state, sections) => {
+    const nextKeys = new Set(sections.map((section) => section.key));
+    state.collapsed = new Set(
+      Array.from(state.collapsed).filter((key) => nextKeys.has(key))
+    );
+  };
+
+  const renderHeadingFolds = (container) => {
+    const sections = getHeadingSections(container);
+    const foldableSections = sections.filter((section) => section.hasContent);
+
+    if (!foldableSections.length) {
+      cleanupHeadingFolds(container);
+      return;
+    }
+
+    const state = getFoldState(container);
+    const signature = getHeadingSignature(sections);
+
+    if (state.signature !== signature) {
+      state.signature = signature;
+      reconcileFoldState(state, sections);
+      state.cssText = "";
+    }
+
+    container.classList.add(hasFoldsClass);
+    container.setAttribute(rootAttribute, state.rootId);
+    containersByFoldRootId.set(state.rootId, container);
+
+    renderHeadingFoldToolbar(container, state);
+    renderHeadingFoldStyle(container, state, sections);
+  };
+
+  const updateHeadingFolds = (container, sections, state) => {
+    reconcileFoldState(state, sections);
+    state.cssText = "";
+    renderHeadingFoldStyle(container, state, sections);
+  };
+
+  const applyFoldAction = (container, action, level) => {
+    const sections = getHeadingSections(container);
+    const foldableSections = sections.filter((section) => section.hasContent);
+    const state = getFoldState(container);
+
+    if (action === "unfold-all") {
+      state.collapsed.clear();
+      updateHeadingFolds(container, sections, state);
+      return;
+    }
+
+    if (action === "fold-all") {
+      state.collapsed.clear();
+      for (const section of foldableSections) {
+        if (!selectionIntersectsSectionContent(container, section)) {
+          state.collapsed.add(section.key);
+        }
+      }
+      updateHeadingFolds(container, sections, state);
+      return;
+    }
+
+    if (action === "fold-to-current") {
+      const currentSection = getCurrentHeadingSection(container, sections);
+      if (!currentSection) {
+        return;
+      }
+
+      state.collapsed.clear();
+      for (const section of foldableSections) {
+        if (
+          section.key !== currentSection.key &&
+          section.level >= currentSection.level &&
+          !selectionIntersectsSectionContent(container, section)
+        ) {
+          state.collapsed.add(section.key);
+        }
+      }
+      updateHeadingFolds(container, sections, state);
+      return;
+    }
+
+    if (action === "fold-to-level" && Number.isInteger(level)) {
+      state.collapsed.clear();
+      for (const section of foldableSections) {
+        if (
+          section.level >= level &&
+          !selectionIntersectsSectionContent(container, section)
+        ) {
+          state.collapsed.add(section.key);
+        }
+      }
+      updateHeadingFolds(container, sections, state);
+    }
+  };
+
+  const toggleHeadingFold = (container, heading) => {
+    const sections = getHeadingSections(container);
+    const section = sections.find((entry) => entry.heading === heading);
+
+    if (!section?.hasContent) {
+      return;
+    }
+
+    const state = getFoldState(container);
+
+    if (state.collapsed.has(section.key)) {
+      state.collapsed.delete(section.key);
+    } else {
+      state.collapsed.add(section.key);
+    }
+
+    updateHeadingFolds(container, sections, state);
+  };
+
+  const handleToolbarClick = (event) => {
+    const button = event.target?.closest?.(
+      `.${toolbarClass} button[${actionAttribute}]`
+    );
+    if (!button) {
+      return false;
+    }
+
+    const toolbar = button.closest(`.${toolbarClass}`);
+    const rootId = toolbar?.getAttribute(toolbarForAttribute);
+    const container = rootId ? containersByFoldRootId.get(rootId) : null;
+    if (!container) {
+      return false;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const action = button.getAttribute(actionAttribute);
+    const levelValue = button.getAttribute(levelAttribute);
+    const level = levelValue ? Number(levelValue) : undefined;
+    applyFoldAction(container, action, level);
+    return true;
+  };
+
+  const clickIsInHeadingGutter = (event, heading) => {
+    const rect = heading.getBoundingClientRect?.();
+    if (!rect || event.clientX < rect.left || event.clientY < rect.top) {
+      return false;
+    }
+
+    if (event.clientY > rect.bottom) {
+      return false;
+    }
+
+    const paddingLeft =
+      parseFloat(window.getComputedStyle?.(heading)?.paddingLeft || "0") || 0;
+    const gutterWidth = Math.min(36, Math.max(18, paddingLeft));
+    return event.clientX <= rect.left + gutterWidth;
+  };
+
+  const findHeadingForGutterClickInContainer = (event, container) => {
+    const editorRoot = getEditorRoot(container);
+    if (!container || !editorRoot) {
+      return null;
+    }
+
+    return (
+      Array.from(editorRoot.children).find(
+        (child) => isHeading(child) && clickIsInHeadingGutter(event, child)
+      ) || null
+    );
+  };
+
+  const findHeadingForGutterClick = (event) => {
+    const targetHeading = event.target?.closest?.(headingSelector);
+    if (targetHeading && clickIsInHeadingGutter(event, targetHeading)) {
+      return targetHeading;
+    }
+
+    const targetContainer = getPreviewContainer(event.target);
+    const targetContainerHeading = findHeadingForGutterClickInContainer(
+      event,
+      targetContainer
+    );
+    if (targetContainerHeading) {
+      return targetContainerHeading;
+    }
+
+    return null;
+  };
+
+  const handleHeadingClick = (event) => {
+    const heading = findHeadingForGutterClick(event);
+    if (!heading) {
+      return false;
+    }
+
+    const container = getPreviewContainer(heading);
+    const editorRoot = getEditorRoot(container);
+    if (!container || !editorRoot || heading.parentElement !== editorRoot) {
+      return false;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    toggleHeadingFold(container, heading);
+    return true;
+  };
+
+  const handleDocumentClick = (event) => {
+    if (handleToolbarClick(event)) {
+      return;
+    }
+
+    handleHeadingClick(event);
+  };
+
+  const renderContainer = (container) => {
+    renderFrontmatter(container);
+    renderHeadingFolds(container);
+  };
+
+  const getPreviewContainers = () => {
+    const containers = [];
+    const seenContainers = new Set();
+    const seenEditorRoots = new Set();
+
+    for (const container of document.querySelectorAll(contentSelector)) {
+      const editorRoot = getEditorRoot(container);
+      if (!editorRoot || seenEditorRoots.has(editorRoot)) {
+        continue;
+      }
+
+      containers.push(container);
+      seenContainers.add(container);
+      seenEditorRoots.add(editorRoot);
+    }
+
+    for (const editorRoot of document.querySelectorAll(editorRootSelector)) {
+      if (seenEditorRoots.has(editorRoot)) {
+        continue;
+      }
+
+      const container = getContainerForEditorRoot(editorRoot);
+      if (seenContainers.has(container) || !hasMarkdownPreviewShape(container)) {
+        continue;
+      }
+
+      containers.push(container);
+      seenContainers.add(container);
+      seenEditorRoots.add(editorRoot);
+    }
+
+    return containers;
+  };
+
   let scheduled = false;
   const renderAll = () => {
     scheduled = false;
-    for (const container of document.querySelectorAll(contentSelector)) {
+    for (const container of getPreviewContainers()) {
       renderContainer(container);
     }
   };
@@ -366,6 +1205,7 @@
   const observer = new MutationObserver(scheduleRender);
 
   const start = () => {
+    document.addEventListener("click", handleDocumentClick, true);
     observer.observe(document.documentElement, {
       childList: true,
       characterData: true,
@@ -373,6 +1213,16 @@
     });
     scheduleRender();
   };
+
+  if (window.__cursorMarkdownPreviewPatchEnableTestHooks) {
+    window.__cursorMarkdownPreviewPatchTest = {
+      applyFoldAction,
+      getCurrentHeadingSection,
+      getHeadingSections,
+      renderAll,
+      renderContainer,
+    };
+  }
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", start, { once: true });

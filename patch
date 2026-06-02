@@ -190,7 +190,7 @@ build_injection_block() {
     printf '<style>\n'
     cat "$rendered_css"
     printf '\n</style>\n'
-    printf '<script src="./%s"></script>\n' "$JS_OUTPUT_NAME"
+    printf '<script src="./%s?v=%s"></script>\n' "$JS_OUTPUT_NAME" "$session_id"
     printf '%s\n' "$END_MARKER"
   } > "$block_html"
 }

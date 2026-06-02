@@ -45,6 +45,12 @@ check "CSS has font-size variable" bash -c '
 check "JS has frontmatter marker" bash -c '
   grep -q -- "cursorMarkdownPreviewFrontmatter" "$1/custom.js"
 ' _ "$SCRIPT_DIR"
+check "JS has heading fold marker" bash -c '
+  grep -q -- "cursorMarkdownPreviewHeadingFolds" "$1/custom.js"
+' _ "$SCRIPT_DIR"
+check "CSS has heading fold toolbar" bash -c '
+  grep -q -- "cursor-md-heading-fold-toolbar" "$1/custom.css"
+' _ "$SCRIPT_DIR"
 
 echo "=== Fixtures ==="
 check "patch fixture" bash -c '
@@ -76,7 +82,7 @@ HTML
   grep -q -- "--cursor-inline-markdown-editor-font-size: 15px" "$tmp/workbench.html"
   grep -q -- "cursor-markdown-preview-patch.js" "$tmp/workbench.html"
   grep -q -- "cursorMarkdownPreviewFrontmatter" "$tmp/cursor-markdown-preview-patch.js"
-  grep -q -- "<script src=\"./cursor-markdown-preview-patch.js\"></script>" "$tmp/workbench.html"
+  grep -qE -- "<script src=\"\\./cursor-markdown-preview-patch\\.js\\?v=[0-9-]+\"></script>" "$tmp/workbench.html"
   ! grep -q "hotpink" "$tmp/workbench.html"
   ! grep -q "SESSION-ID old" "$tmp/workbench.html"
 ' _ "$SCRIPT_DIR"
@@ -373,6 +379,8 @@ SH
     "$1/ensure-patched" >/dev/null
   test -d "$tmp/lock"
 ' _ "$SCRIPT_DIR"
+
+check "heading folding browser fixture" bash "$SCRIPT_DIR/tests/heading-folding-browser-fixture.sh"
 
 echo
 echo "Passed: $PASS"

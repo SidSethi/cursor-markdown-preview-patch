@@ -108,6 +108,90 @@
   -webkit-user-select: text;
 }
 
+.cursor-md-heading-fold-toolbar {
+  align-items: center;
+  background: var(--vscode-editor-background);
+  box-sizing: border-box;
+  box-shadow: 0 1px 0 var(--vscode-panel-border, var(--vscode-editorWidget-border));
+  color: var(--vscode-editor-foreground);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 6px;
+  line-height: 1.2;
+  margin: 0 auto 6px;
+  max-width: 760px;
+  padding: 8px 16px;
+  position: sticky;
+  top: 0;
+  width: 100%;
+  z-index: 20;
+}
+
+.cursor-md-heading-fold-toolbar button {
+  background: transparent;
+  border: 1px solid var(--vscode-panel-border, var(--vscode-editorWidget-border));
+  border-radius: 4px;
+  color: var(--vscode-editor-foreground);
+  cursor: pointer;
+  font: inherit;
+  min-height: 24px;
+  padding: 3px 8px;
+}
+
+.cursor-md-heading-fold-toolbar button:hover {
+  background: color-mix(in srgb, var(--vscode-editor-foreground) 7%, transparent);
+}
+
+.cursor-md-has-heading-folds
+  .tiptap.ProseMirror
+  > :is(h1, h2, h3, h4, h5, h6, [role="heading"]),
+.tiptap.ProseMirror.cursor-md-has-heading-folds
+  > :is(h1, h2, h3, h4, h5, h6, [role="heading"]) {
+  box-sizing: border-box;
+  margin-left: -1.35em;
+  padding-left: 1.35em;
+  position: relative;
+}
+
+.cursor-md-has-heading-folds
+  .tiptap.ProseMirror
+  > :is(h1, h2, h3, h4, h5, h6, [role="heading"])::before,
+.tiptap.ProseMirror.cursor-md-has-heading-folds
+  > :is(h1, h2, h3, h4, h5, h6, [role="heading"])::before {
+  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+  content: var(--cursor-md-heading-fold-marker, "");
+  cursor: pointer;
+  display: block;
+  font-size: 0.75em;
+  font-weight: 500;
+  left: 0.15em;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: auto;
+  position: absolute;
+  text-align: center;
+  top: 0.35em;
+  transition: opacity 120ms ease;
+  user-select: none;
+  width: 1em;
+  -webkit-user-select: none;
+}
+
+.cursor-md-has-heading-folds
+  .tiptap.ProseMirror
+  > :is(h1, h2, h3, h4, h5, h6, [role="heading"]):hover::before,
+.cursor-md-has-heading-folds
+  .tiptap.ProseMirror
+  > :is(h1, h2, h3, h4, h5, h6, [role="heading"]):focus-within::before,
+.tiptap.ProseMirror.cursor-md-has-heading-folds
+  > :is(h1, h2, h3, h4, h5, h6, [role="heading"]):hover::before,
+.tiptap.ProseMirror.cursor-md-has-heading-folds
+  > :is(h1, h2, h3, h4, h5, h6, [role="heading"]):focus-within::before {
+  color: var(--vscode-textLink-foreground, var(--vscode-editor-foreground));
+  opacity: 0.85;
+}
+
 /*
    Cursor assigns its own sizes to some rich Markdown elements. Inheriting here
    keeps body text aligned with the editor font size injected above.
