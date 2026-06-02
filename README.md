@@ -1,6 +1,6 @@
 # Cursor editable Markdown preview CSS/JS patch
 
-Cursor's native editable rendered Markdown preview does not currently allow custom styling or frontmatter rendering. This repo is a small unsupported workaround: it patches Cursor's installed app bundle, injects custom CSS into `workbench.html`, and installs a same-origin JavaScript renderer next to `workbench.html`.
+Cursor's native editable rendered Markdown preview does not currently allow custom styling, frontmatter rendering, or heading folding. This repo is a small unsupported workaround: it patches Cursor's installed app bundle, injects custom CSS into `workbench.html`, and installs a same-origin JavaScript renderer next to `workbench.html`.
 
 It targets Cursor's private `.markdown-editor-react__richtext-content` DOM, which is used by the native `Preview | Markdown` editor surface. The current patch combines CSS typography/layout changes with JavaScript frontmatter detection so leading YAML frontmatter renders as a compact metadata table inspired by GitHub's Markdown preview, and normal Markdown headings can be visually folded from the editable preview.
 
@@ -165,6 +165,7 @@ cursor-inline-markdown-preview-rollback
   - Bash script that backs up and patches Cursor's `workbench.html`.
   - Reads Cursor's `editor.fontSize` and renders the CSS with that value.
   - Installs `custom.js` as `cursor-markdown-preview-patch.js` next to Cursor's `workbench.html`, because Cursor's CSP blocks inline scripts.
+  - Repairs known Cursor Trusted Types policy names in stale clean workbench bases before injecting, then verifies them when a `trusted-types` CSP is present.
   - Can be re-run to apply changes.
 - `rollback`
   - Bash script that restores the latest clean backup created by the patch script.
@@ -172,7 +173,7 @@ cursor-inline-markdown-preview-rollback
   - Removes the managed JavaScript asset when restoring a workbench that no longer references it.
 - `ensure-patched`
   - Bash script for launchd or other update triggers.
-  - Checks for the managed patch before running `patch`, so it avoids unnecessary backups.
+  - Checks for the managed patch, JS feature tokens, and repaired Trusted Types policies before running `patch`, so it avoids unnecessary backups.
   - Uses a lock and short debounce for duplicate filesystem events during updates.
 - `install-auto-reapply`
   - Builds the local runner app and installs the app-backed LaunchAgent.
@@ -181,6 +182,8 @@ cursor-inline-markdown-preview-rollback
   - End-to-end verifier for the auto-reapply path.
   - Rolls back the live patch, triggers the LaunchAgent, verifies restoration,
     and restores manually on failure.
+  - Verifies managed markers, JS feature tokens, and repaired Trusted Types policies after the LaunchAgent run.
+  - Uses the same app-bundle workbench path candidates as the patch script.
 - `runner/`
   - Swift source for the local app that runs `ensure-patched`.
 - `launchd/`
@@ -189,8 +192,12 @@ cursor-inline-markdown-preview-rollback
   - CSS source for Cursor's editable rendered Markdown preview, rendered frontmatter table, and heading-folding controls.
 - `custom.js`
   - JavaScript source that recognizes leading YAML frontmatter in Cursor's rendered Markdown DOM, replaces the raw render with a compact metadata table, and adds visual heading folding in the editable Markdown preview.
+- `tests/`
+  - Browser fixture coverage for the injected frontmatter and heading-folding
+    runtime.
 - `test.sh`
-  - Fixture smoke tests for the patch and rollback scripts.
+  - Fixture smoke tests for the patch, rollback, ensure, and browser-runtime
+    paths.
 
 ## Caveats
 
@@ -221,6 +228,8 @@ The script inserts a managed block before `</html>` in Cursor's workbench file:
 ```
 
 The script removes any previous managed block before writing a new one, so it is safe to rerun after editing `custom.css`, editing `custom.js`, or after Cursor updates. The query string is a cache buster so an existing Cursor renderer reloads the current JS asset after a live reapply.
+
+Before injection, `patch` also repairs the current known Cursor Trusted Types policy names in the workbench CSP if the base `workbench.html` has a `trusted-types` directive. This protects against a stale clean backup being restored after Cursor's JavaScript bundle has started using newer policy names.
 
 `custom.css` stays valid CSS. Instead of using invalid template tokens, `patch` can rewrite this custom property in the temporary injected copy:
 
@@ -358,10 +367,11 @@ The rollback script uses the same `CURSOR_WORKBENCH_PATCH_BACKUP_ROOT` override.
 Read-only historical notes:
 
 - [2026-05-14 frontmatter rendering postmortem](./ARCHIVE-2026-05-14-frontmatter-rendering-postmortem.md)
+- [2026-06-02 heading-folding implementation plan](./ARCHIVE-2026-06-02-heading-folding-plan.md)
 
 ## Verification and version support
 
-Verification was last run locally against this checkout on 2026-05-26:
+Baseline auto-reapply verification was run locally against this checkout on 2026-05-26:
 
 - `./test.sh`: 21 passed, 0 failed
 - `./verify-auto-reapply`: passed
@@ -482,6 +492,64 @@ Pinned toolbar verification was run later on 2026-06-02:
 - Live backup from that apply:
   `$HOME/Library/Application Support/Cursor/workbench-patch-backups/cursor-app-20260602-144146/workbench.html`
 
+Review follow-up hardening verification was run later on 2026-06-02:
+
+- `node --check custom.js`: passed
+- `bash -n patch rollback ensure-patched install-auto-reapply verify-auto-reapply test.sh tests/heading-folding-browser-fixture.sh`: passed
+- `shellcheck patch rollback ensure-patched install-auto-reapply verify-auto-reapply test.sh tests/heading-folding-browser-fixture.sh`: passed
+- `./test.sh`: 24 passed, 0 failed
+- `git diff --check`: passed
+- This run used fixture validation only. It did not run `./patch`,
+  `./rollback`, or `./verify-auto-reapply` against the live Cursor app bundle.
+
+Live review follow-up hardening verification was run later on 2026-06-02 against
+the working tree based on commit
+`2a8e51e69ac2d32cf0d4fb158633e75cfcb03d03`:
+
+- `./test.sh`: 25 passed, 0 failed
+- `node --check custom.js`: passed
+- `bash -n patch rollback ensure-patched install-auto-reapply verify-auto-reapply test.sh tests/heading-folding-browser-fixture.sh`: passed
+- `shellcheck patch rollback ensure-patched install-auto-reapply verify-auto-reapply test.sh tests/heading-folding-browser-fixture.sh`: passed
+- `git diff --check`: passed
+- `./patch`: applied to the live Cursor app bundle
+- `./verify-auto-reapply`: passed against the live LaunchAgent
+  - rolled back the live patch
+  - triggered `com.sidsethi.cursor-markdown-preview-patch.ensure`
+  - LaunchAgent runs advanced from `51` to `54`
+  - LaunchAgent state returned to `not running`
+  - LaunchAgent last exit was `0`
+  - final live script tag used `cursor-markdown-preview-patch.js?v=20260602-164526`
+- Live bundle checks:
+  - installed JS contained `cursorMarkdownPreviewFrontmatter`,
+    `cursorMarkdownPreviewHeadingFolds`, `selectionSectionKeysByContainer`, and
+    `cleanupDetachedHeadingFoldContainers`
+  - workbench CSP contained `streamingMarkdownPolicy`, `mermaidDiagram2`, and
+    `mermaidDiagramOuter`
+- Computer Use live UI checks:
+  - Cursor opened successfully after the Trusted Types repair
+  - the native `Preview | Markdown` fold toolbar rendered
+  - clicking an H1 gutter while the caret was in that H1's intro paragraph kept
+    the section open
+  - clicking the H1 gutter while selection was in the heading still folded the
+    section
+  - leading frontmatter rendered as a metadata table
+  - a later metadata-looking block stayed normal document content
+- Live manual patch backup from this run:
+  `$HOME/Library/Application Support/Cursor/workbench-patch-backups/cursor-app-20260602-164220/workbench.html`
+- Live auto-reapply backup from this run:
+  `$HOME/Library/Application Support/Cursor/workbench-patch-backups/cursor-app-20260602-164526/workbench.html`
+
+This live run found a Cursor-startup failure that fixture tests did not cover:
+restoring a stale clean backup could leave the current Cursor JavaScript bundle
+using Trusted Types policy names that were missing from the restored
+`workbench.html` CSP. Cursor then opened to a blank workbench. The patch now
+repairs `streamingMarkdownPolicy`, `mermaidDiagram2`, and `mermaidDiagramOuter`
+before injection, and `ensure-patched` plus `verify-auto-reapply` treat missing
+policy names as an unpatched state when a `trusted-types` directive is present.
+During the same run, Cursor downloaded an update; the LaunchAgent patched both
+the ShipIt update cache workbenches and the installed `/Applications/Cursor.app`
+workbench.
+
 A previous local app-bundle selector preflight was run on 2026-05-21. The live
 Cursor app was not modified during that preflight:
 
@@ -523,6 +591,83 @@ The alternatives I tested did not cover the same workflow:
   - Affects/improves the side preview.
   - Did not make the side preview directly editable.
   - Did not affect Cursor native `Preview | Markdown`.
+
+### Extension/settings viability snapshot
+
+Snapshot date: 2026-06-02.
+
+Inspected repo commit:
+
+```text
+2a8e51e69ac2d32cf0d4fb158633e75cfcb03d03
+```
+
+Inspected local Cursor app:
+
+- Cursor version: `3.5.33`
+- Cursor bundle id: `com.todesktop.230313mzl4w4u92`
+- Workbench bundle still contains Cursor's native editable Markdown preview
+  surface:
+  - `.markdown-editor-react__richtext-content`
+  - `contentClassName:"markdown-editor-react__richtext-content"`
+  - `editable:!0`
+- Built-in Markdown extension still exposes normal VS Code Markdown preview
+  machinery:
+  - `markdown.styles`
+  - `markdown.preview.fontSize`
+  - `markdown.previewStyles`
+  - `markdown.previewScripts`
+  - `markdown.markdownItPlugins`
+  - custom editor id `vscode.markdown.preview.editor`
+
+Current verdict:
+
+- A settings or extension path is viable for the VS Code-style Markdown preview
+  webview:
+  - `Markdown: Open Preview`
+  - `Markdown: Open Preview to the Side`
+  - the `vscode.markdown.preview.editor` custom editor
+  - third-party preview webviews such as Markdown Preview Enhanced
+- That path is not currently a replacement for this repo's goal:
+  - Cursor native `Preview | Markdown`
+  - editable rendered Markdown in the main workbench DOM
+  - no separate raw-editor plus side-preview workflow
+- The important distinction is surface ownership:
+  - VS Code Markdown APIs customize the Markdown preview webview.
+  - Cursor's editable preview is a private Tiptap/ProseMirror component in the
+    main Cursor workbench bundle.
+  - I did not find a supported Cursor/VS Code setting, contribution point, or
+    extension API that injects CSS/JS into that native editable preview in place.
+- A custom extension could build a new editable webview/custom editor, but that
+  would be a replacement editor, not customization of Cursor's native editable
+  preview. It would need to recreate editing, selection, document sync, undo,
+  checkboxes, focus behavior, and Cursor-specific integration.
+
+Primary docs checked:
+
+- Cursor migration docs state that Cursor is based on VS Code and supports
+  importing VS Code settings and extensions:
+  <https://docs.cursor.com/en/guides/migration/vscode>
+- VS Code Markdown docs describe `markdown.styles` as applying to the Markdown
+  preview:
+  <https://code.visualstudio.com/docs/languages/markdown#_using-your-own-css>
+- VS Code Markdown extension docs describe `markdown.previewStyles`,
+  `markdown.markdownItPlugins`, and `markdown.previewScripts` as Markdown
+  preview extension points:
+  <https://code.visualstudio.com/api/extension-guides/markdown-extension>
+- VS Code webview docs describe custom webviews as fully customizable but
+  separate, resource-heavy extension UI:
+  <https://code.visualstudio.com/api/extension-guides/webview>
+
+Recheck this conclusion when any of these change:
+
+- Cursor exposes an official API or setting for the native editable Markdown
+  preview.
+- Cursor changes `Preview | Markdown` from the private
+  `.markdown-editor-react__richtext-content` / Tiptap surface to a documented
+  extension-owned surface.
+- The local Cursor bundle no longer contains the current private selector or the
+  relevant VS Code Markdown preview contribution points.
 
 ### Inspecting Cursor internals
 

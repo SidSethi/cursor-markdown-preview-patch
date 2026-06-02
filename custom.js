@@ -49,7 +49,9 @@
   const frontmatterSourcesByContainer = new WeakMap();
   const foldStatesByContainer = new WeakMap();
   const containersByFoldRootId = new Map();
+  const selectionSectionKeysByContainer = new Map();
   let nextFoldRootId = 1;
+  let suppressNextHeadingClick = false;
 
   const normalizeString = (value) =>
     (value || "")
@@ -411,37 +413,29 @@
   };
 
   const findHeadingCandidate = (container) => {
-    const headings = Array.from(container.querySelectorAll(headingSelector));
+    const children = getEditorChildren(container);
+    const openingRule = children[0];
+    const heading = children[1];
 
-    for (const heading of headings) {
-      if (heading.classList?.contains(tableClass)) {
-        continue;
-      }
-
-      const sourceText = normalizeText(heading);
-      if (!sourceText.match(/^name:\s+/) || !sourceText.includes("description:")) {
-        continue;
-      }
-
-      const rows = parseYamlishFrontmatter(sourceText);
-      if (!rows.length) {
-        continue;
-      }
-
-      const sourceNodes = [heading];
-      const previous = heading.previousElementSibling;
-      if (isHorizontalRule(previous)) {
-        sourceNodes.unshift(previous);
-      }
-
-      return {
-        rows,
-        sourceNodes,
-        signature: `heading:${sourceText}`,
-      };
+    if (!isHorizontalRule(openingRule) || !isHeading(heading)) {
+      return null;
     }
 
-    return null;
+    const sourceText = normalizeText(heading);
+    if (!sourceText.match(/^name:\s+/) || !sourceText.includes("description:")) {
+      return null;
+    }
+
+    const rows = parseYamlishFrontmatter(sourceText);
+    if (!rows.length) {
+      return null;
+    }
+
+    return {
+      rows,
+      sourceNodes: [openingRule, heading],
+      signature: `heading:${sourceText}`,
+    };
   };
 
   const findFrontmatterCandidate = (container) => {
@@ -453,9 +447,9 @@
     const children = getEditorChildren(container).filter(
       (child) => !child.classList?.contains(tableClass)
     );
-    const startIndex = children.findIndex((child) => isHorizontalRule(child));
+    const startIndex = 0;
 
-    if (startIndex === -1) {
+    if (!isHorizontalRule(children[startIndex])) {
       return null;
     }
 
@@ -693,6 +687,12 @@
       return;
     }
 
+    for (const element of document.querySelectorAll(
+      `.${toolbarClass}[${toolbarForAttribute}="${state.rootId}"], .${styleClass}[${styleForAttribute}="${state.rootId}"]`
+    )) {
+      element.remove();
+    }
+
     const renderHost = getRenderHost(container);
     const toolbarHost = getHeadingFoldToolbarHost(container);
     const hosts = toolbarHost === renderHost ? [renderHost] : [renderHost, toolbarHost];
@@ -717,6 +717,7 @@
       containersByFoldRootId.delete(state.rootId);
     }
 
+    selectionSectionKeysByContainer.delete(container);
     container.classList.remove(hasFoldsClass);
     container.removeAttribute(rootAttribute);
     foldStatesByContainer.delete(container);
@@ -856,6 +857,10 @@
   };
 
   const selectionIntersectsSectionContent = (container, section) => {
+    if (selectionSectionKeysByContainer.get(container)?.has(section.key)) {
+      return true;
+    }
+
     const selection = window.getSelection?.();
     if (!selection || selection.rangeCount === 0 || !section.hasContent) {
       return false;
@@ -873,6 +878,56 @@
     }
 
     return false;
+  };
+
+  const getSelectionSectionKeys = (container, sections) => {
+    const selection = window.getSelection?.();
+    const editorRoot = getEditorRoot(container);
+    const keys = new Set();
+
+    if (!selection || selection.rangeCount === 0 || !editorRoot) {
+      return keys;
+    }
+
+    const candidateNodes = [selection.focusNode, selection.anchorNode].filter(
+      Boolean
+    );
+    const selectionTouchesEditor =
+      candidateNodes.some((node) => editorRoot.contains(node)) ||
+      selectionIntersectsNode(selection, editorRoot);
+
+    if (!selectionTouchesEditor) {
+      return keys;
+    }
+
+    const children = getEditorChildren(container);
+    for (const section of sections.filter((entry) => entry.hasContent)) {
+      for (
+        let index = section.contentStartIndex;
+        index <= section.contentEndIndex;
+        index += 1
+      ) {
+        const child = children[index];
+        if (child && selectionIntersectsNode(selection, child)) {
+          keys.add(section.key);
+          break;
+        }
+      }
+    }
+
+    return keys;
+  };
+
+  const rememberSelectionContext = (container, sections) => {
+    const keys = getSelectionSectionKeys(container, sections);
+
+    if (keys.size) {
+      selectionSectionKeysByContainer.set(container, keys);
+    } else {
+      selectionSectionKeysByContainer.delete(container);
+    }
+
+    return keys;
   };
 
   const getDirectEditorChildForNode = (editorRoot, node) => {
@@ -1064,6 +1119,10 @@
     if (state.collapsed.has(section.key)) {
       state.collapsed.delete(section.key);
     } else {
+      if (selectionIntersectsSectionContent(container, section)) {
+        return;
+      }
+
       state.collapsed.add(section.key);
     }
 
@@ -1160,7 +1219,41 @@
     return true;
   };
 
+  const handleHeadingMouseDown = (event) => {
+    const heading = findHeadingForGutterClick(event);
+    if (!heading) {
+      return false;
+    }
+
+    const container = getPreviewContainer(heading);
+    const editorRoot = getEditorRoot(container);
+    if (!container || !editorRoot || heading.parentElement !== editorRoot) {
+      return false;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    suppressNextHeadingClick = true;
+    toggleHeadingFold(container, heading);
+    return true;
+  };
+
+  const handleDocumentMouseDown = (event) => {
+    if (handleHeadingMouseDown(event)) {
+      return;
+    }
+
+    window.setTimeout(handleSelectionChange, 0);
+  };
+
   const handleDocumentClick = (event) => {
+    if (suppressNextHeadingClick) {
+      suppressNextHeadingClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
     if (handleToolbarClick(event)) {
       return;
     }
@@ -1171,6 +1264,17 @@
   const renderContainer = (container) => {
     renderFrontmatter(container);
     renderHeadingFolds(container);
+  };
+
+  const cleanupDetachedHeadingFoldContainers = (activeContainers) => {
+    for (const [, container] of Array.from(containersByFoldRootId.entries())) {
+      if (
+        !activeContainers.has(container) ||
+        !document.documentElement.contains(container)
+      ) {
+        cleanupHeadingFolds(container);
+      }
+    }
   };
 
   const getPreviewContainers = () => {
@@ -1207,12 +1311,23 @@
     return containers;
   };
 
+  const handleSelectionChange = () => {
+    for (const container of getPreviewContainers()) {
+      rememberSelectionContext(container, getHeadingSections(container));
+    }
+  };
+
   let scheduled = false;
   const renderAll = () => {
     scheduled = false;
-    for (const container of getPreviewContainers()) {
+    const containers = getPreviewContainers();
+    const activeContainers = new Set(containers);
+
+    for (const container of containers) {
       renderContainer(container);
     }
+
+    cleanupDetachedHeadingFoldContainers(activeContainers);
   };
 
   const scheduleRender = () => {
@@ -1227,7 +1342,9 @@
   const observer = new MutationObserver(scheduleRender);
 
   const start = () => {
+    document.addEventListener("mousedown", handleDocumentMouseDown, true);
     document.addEventListener("click", handleDocumentClick, true);
+    document.addEventListener("keyup", handleSelectionChange, true);
     observer.observe(document.documentElement, {
       childList: true,
       characterData: true,

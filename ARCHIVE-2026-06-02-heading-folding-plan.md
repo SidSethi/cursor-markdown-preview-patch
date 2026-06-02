@@ -1,6 +1,11 @@
-# Heading Folding In Cursor Markdown Preview - Plan
+# Archived Heading Folding In Cursor Markdown Preview Plan
 
-> Adversarial implementation plan for Obsidian-like heading folding in Cursor's native editable Markdown preview.
+> Historical implementation plan for Obsidian-like heading folding in Cursor's
+> native editable Markdown preview.
+
+Archived on 2026-06-02 after the heading-folding system was implemented and
+documented in `README.md`, `custom.js`, `custom.css`, and the fixture tests.
+This file is useful design history, not the current source of truth.
 
 ---
 

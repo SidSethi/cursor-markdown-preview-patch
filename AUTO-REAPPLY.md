@@ -8,14 +8,18 @@
 # Current State
 
 - Patch target:
-  - `/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-sandbox/workbench/workbench.html`
+  - Cursor's `electron-sandbox` or `electron-browser` workbench path under
+    `/Applications/Cursor.app` or `~/Applications/Cursor.app`
   - same workbench directory receives `cursor-markdown-preview-patch.js`
 - Patch implementation:
   - `patch` injects a managed CSS/JS block before `</html>`
   - `patch` copies `custom.js` into Cursor's workbench directory
   - `patch` removes an older managed block before reinjecting
+  - `patch` repairs known Cursor Trusted Types policy names in stale clean
+    workbench bases before injecting
   - `patch` backs up the original `workbench.html`
-  - `patch` verifies markers and the installed JS token before reporting success
+  - `patch` verifies markers, both installed JS feature tokens, and repaired
+    Trusted Types policies before reporting success
 - Rollback implementation:
   - `rollback` restores the newest clean backup by default
   - backups containing the managed patch are skipped by default
@@ -37,6 +41,14 @@
   - `./verify-auto-reapply` passed end-to-end after the runner received App
     Management permission
   - current `workbench.html` contains the managed patch markers and JS asset
+- Current machine evidence checked on 2026-06-02:
+  - `./verify-auto-reapply` passed end-to-end after a live rollback
+  - LaunchAgent runs advanced from `51` to `54`
+  - LaunchAgent state returned to `not running`
+  - LaunchAgent last exit was `0`
+  - current `workbench.html` contains the managed patch markers, JS asset, and
+    repaired Trusted Types policies
+  - ShipIt update-cache workbenches were also patched during the run
 
 ---
 
@@ -106,7 +118,8 @@ Responsibilities:
 - acquire a lock
 - sleep briefly to let ShipIt finish replacing the bundle
 - locate `workbench.html`
-- exit if the patch markers and JS asset are already present
+- exit if the patch markers, JS asset, feature tokens, and Trusted Types policy
+  repairs are already present
 - run the patch command only when the patch is missing
 - log all output
 - avoid UI scripting by default
@@ -348,7 +361,8 @@ launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.sidsethi.cursor
    - rolls back the live patch to simulate an update
    - triggers the LaunchAgent
    - waits for the runner to finish
-   - verifies markers and JS asset were restored
+   - verifies markers, JS asset, feature tokens, and Trusted Types policies were
+     restored
    - restores the patch manually before exiting if auto-reapply fails
 
 6. `test.sh`
@@ -397,6 +411,22 @@ Final verified test on 2026-05-26:
 - LaunchAgent last exit was `0`
 - `workbench.html` regained the managed markers
 - `cursor-markdown-preview-patch.js` existed and contained the frontmatter token
+
+Live hardening test on 2026-06-02:
+
+- `./verify-auto-reapply` rolled back the live patch
+- app-backed LaunchAgent ran through the runner
+- LaunchAgent runs advanced from `51` to `54`
+- LaunchAgent state returned to `not running`
+- LaunchAgent last exit was `0`
+- `workbench.html` regained the managed markers
+- `cursor-markdown-preview-patch.js` existed and contained the frontmatter and
+  heading-folding feature tokens
+- `workbench.html` contained `streamingMarkdownPolicy`, `mermaidDiagram2`, and
+  `mermaidDiagramOuter`
+- Cursor opened successfully after the repair
+- During this run, Cursor downloaded an update and the runner patched both the
+  ShipIt update cache workbenches and `/Applications/Cursor.app`
 
 ---
 

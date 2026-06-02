@@ -16,6 +16,9 @@ in the repo.
   `tests/`, and `test.sh` are the live implementation surface.
 - `ARCHIVE-2026-05-14-frontmatter-rendering-postmortem.md` is historical
   context only.
+- `ARCHIVE-2026-06-02-heading-folding-plan.md` is historical context only; the
+  implemented heading-folding behavior is documented in `README.md` and the
+  live source/tests.
 - `AUTO-REAPPLY.md` is the auto-reapply design and verification runbook.
 
 ## Safety Boundaries

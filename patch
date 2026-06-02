@@ -15,7 +15,13 @@ readonly CURSOR_SETTINGS="$HOME/Library/Application Support/Cursor/User/settings
 readonly BACKUP_ROOT="${CURSOR_WORKBENCH_PATCH_BACKUP_ROOT:-$HOME/Library/Application Support/Cursor/workbench-patch-backups}"
 readonly DEFAULT_EDITOR_FONT_SIZE="13"
 readonly CSS_FONT_SIZE_PROPERTY="--cursor-inline-markdown-editor-font-size"
-readonly JS_VERIFY_TOKEN="cursorMarkdownPreviewFrontmatter"
+readonly JS_VERIFY_TOKEN_FRONTMATTER="cursorMarkdownPreviewFrontmatter"
+readonly JS_VERIFY_TOKEN_HEADING_FOLDS="cursorMarkdownPreviewHeadingFolds"
+readonly -a TRUSTED_TYPES_POLICY_NAMES=(
+  "streamingMarkdownPolicy"
+  "mermaidDiagram2"
+  "mermaidDiagramOuter"
+)
 
 readonly START_MARKER="<!-- !! VSCODE-CUSTOM-CSS-START !! -->"
 readonly END_MARKER="<!-- !! VSCODE-CUSTOM-CSS-END !! -->"
@@ -178,6 +184,28 @@ remove_existing_patch() {
   ' "$source_html" > "$cleaned_html"
 }
 
+# Cursor sometimes adds Trusted Types policies in workbench JS before a fresh
+# clean backup exists. Preserve startup by allowing the known current policies.
+repair_trusted_types_policies() {
+  local source_html="$1"
+  local repaired_html="$2"
+  local policies
+  policies="$(printf '%s\n' "${TRUSTED_TYPES_POLICY_NAMES[@]}")"
+
+  PATCH_TRUSTED_TYPES_POLICIES="$policies" perl -0pe '
+    @policies = grep { length } split /\n/, $ENV{"PATCH_TRUSTED_TYPES_POLICIES"};
+    s/(\n\s*trusted-types\s+)(.*?)(\n\s*;\s*)/
+      my ($prefix, $body, $suffix) = ($1, $2, $3);
+      for my $policy (@policies) {
+        if ($body !~ m{(^|\s)\Q$policy\E(?=\s|$)}) {
+          $body .= "\n\t\t\t\t\t$policy";
+        }
+      }
+      "$prefix$body$suffix";
+    /egs;
+  ' "$source_html" > "$repaired_html"
+}
+
 # Build the HTML block that will be injected into workbench.html.
 build_injection_block() {
   local session_id="$1"
@@ -222,13 +250,22 @@ insert_block_before_closing_html() {
 verify_patch() {
   local workbench_html="$1"
   local managed_js="$2"
+  local policy
 
   grep -qF "$START_MARKER" "$workbench_html" &&
     grep -qF "$END_MARKER" "$workbench_html" &&
     grep -qF -- "$CSS_FONT_SIZE_PROPERTY" "$workbench_html" &&
     grep -qF -- "$JS_OUTPUT_NAME" "$workbench_html" &&
     [[ -f "$managed_js" ]] &&
-    grep -qF -- "$JS_VERIFY_TOKEN" "$managed_js"
+    grep -qF -- "$JS_VERIFY_TOKEN_FRONTMATTER" "$managed_js" &&
+    grep -qF -- "$JS_VERIFY_TOKEN_HEADING_FOLDS" "$managed_js" ||
+    return 1
+
+  if grep -qF "trusted-types" "$workbench_html"; then
+    for policy in "${TRUSTED_TYPES_POLICY_NAMES[@]}"; do
+      grep -qF -- "$policy" "$workbench_html" || return 1
+    done
+  fi
 }
 
 # Print a unique backup directory path for this patch run.
@@ -282,8 +319,9 @@ main() {
   # trap registers cleanup code that runs when the script exits for any reason.
   trap '[[ -n "${PATCH_TMP_DIR:-}" ]] && rm -rf "$PATCH_TMP_DIR"' EXIT
 
-  local cleaned_html rendered_css block_html patched_html
+  local cleaned_html repaired_html rendered_css block_html patched_html
   cleaned_html="$tmp_dir/workbench.cleaned.html"
+  repaired_html="$tmp_dir/workbench.repaired.html"
   rendered_css="$tmp_dir/custom.css"
   block_html="$tmp_dir/custom-css-block.html"
   patched_html="$tmp_dir/workbench.patched.html"
@@ -292,9 +330,10 @@ main() {
 
   render_css "$font_size_px" > "$rendered_css"
   remove_existing_patch "$workbench_html" "$cleaned_html"
+  repair_trusted_types_policies "$cleaned_html" "$repaired_html"
   build_injection_block "$session_id" "$rendered_css" "$block_html"
 
-  insert_block_before_closing_html "$cleaned_html" "$block_html" "$patched_html" || {
+  insert_block_before_closing_html "$repaired_html" "$block_html" "$patched_html" || {
     echo "backup retained at: $backup_path" >&2
     die "</html> not found in $workbench_html"
   }

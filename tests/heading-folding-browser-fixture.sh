@@ -95,6 +95,16 @@ cat > "$tmp/fixture.html" <<HTML
       </div>
     </div>
 
+    <div id="non-leading-frontmatter-fixture" class="markdown-editor-react__richtext-content">
+      <div class="tiptap ProseMirror" contenteditable="true">
+        <h1>Body Heading</h1>
+        <p>Intro before metadata-like content</p>
+        <hr>
+        <h1>name: not-frontmatter<br>description: Body metadata.</h1>
+        <p>Body after metadata-like content</p>
+      </div>
+    </div>
+
     <div id="empty-heading-fixture" class="markdown-editor-react__richtext-content">
       <div class="tiptap ProseMirror" contenteditable="true">
         <h1>Empty Test</h1>
@@ -177,6 +187,7 @@ cat > "$tmp/fixture.html" <<HTML
     for (const id of [
       "fixture",
       "frontmatter-fixture",
+      "non-leading-frontmatter-fixture",
       "empty-heading-fixture",
       "same-tag-fixture",
       "promoted-toolbar-fixture",
@@ -238,6 +249,24 @@ cat > "$tmp/fixture.html" <<HTML
       };
 
       const clickHeadingGutter = (heading, xOffset = 8) => {
+        const rect = heading.getBoundingClientRect();
+        const clickTarget = heading.parentElement || heading;
+        const eventOptions = {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + xOffset,
+          clientY: rect.top + Math.max(4, Math.min(12, rect.height / 2)),
+        };
+
+        for (const eventName of ["mousedown", "mouseup", "click"]) {
+          clickTarget.dispatchEvent(
+            new MouseEvent(eventName, {
+              ...eventOptions,
+            })
+          );
+        }
+      };
+      const legacyClickHeadingGutter = (heading, xOffset = 8) => {
         const rect = heading.getBoundingClientRect();
         const clickTarget = heading.parentElement || heading;
         clickTarget.dispatchEvent(
@@ -315,10 +344,27 @@ cat > "$tmp/fixture.html" <<HTML
           directToggleSelection.addRange(directToggleRange);
           clickHeadingGutter(root.children[0]);
           assert(
+            !getOwnedStyle(container).textContent.includes(
+              ":nth-child(n + 2):nth-child(-n + 8)"
+            ),
+            "clicking H1 gutter skips fold while selection is inside content"
+          );
+          hooks.renderAll();
+          assert(
+            !getOwnedStyle(container).textContent.includes(
+              ":nth-child(n + 2):nth-child(-n + 8)"
+            ),
+            "selection-protected direct fold remains skipped after rerender"
+          );
+          assertChildrenUnmutated("fixture");
+
+          directToggleSelection.removeAllRanges();
+          clickHeadingGutter(root.children[0]);
+          assert(
             getOwnedStyle(container).textContent.includes(
               ":nth-child(n + 2):nth-child(-n + 8)"
             ),
-            "clicking H1 gutter folds H1 content range even with selection inside"
+            "clicking H1 gutter folds H1 content range when selection is clear"
           );
           hooks.renderAll();
           assert(
@@ -329,12 +375,11 @@ cat > "$tmp/fixture.html" <<HTML
           );
           assertChildrenUnmutated("fixture");
 
-          clickHeadingGutter(root.children[0]);
+          legacyClickHeadingGutter(root.children[0]);
           assert(
             !getOwnedStyle(container).textContent.includes("display: none"),
-            "clicking H1 gutter again unfolds H1"
+            "legacy click-only H1 gutter handler still unfolds H1"
           );
-          directToggleSelection.removeAllRanges();
 
           toolbar
             .querySelector(
@@ -448,6 +493,26 @@ cat > "$tmp/fixture.html" <<HTML
             "frontmatter source heading excluded from heading folds"
           );
           assertChildrenUnmutated("frontmatter-fixture");
+
+          const nonLeadingFrontmatterContainer =
+            document.getElementById("non-leading-frontmatter-fixture");
+          const nonLeadingFrontmatterSections =
+            hooks.getHeadingSections(nonLeadingFrontmatterContainer);
+          assert(
+            !nonLeadingFrontmatterContainer.classList.contains(
+              "cursor-md-has-frontmatter"
+            ),
+            "non-leading metadata-like block is not rendered as frontmatter"
+          );
+          assert(
+            nonLeadingFrontmatterSections.length === 2 &&
+              nonLeadingFrontmatterSections[0].text === "Body Heading" &&
+              nonLeadingFrontmatterSections[1].text.includes(
+                "name: not-frontmatter"
+              ),
+            "non-leading metadata-like heading remains normal document content"
+          );
+          assertChildrenUnmutated("non-leading-frontmatter-fixture");
 
           const emptyContainer =
             document.getElementById("empty-heading-fixture");
@@ -574,6 +639,28 @@ cat > "$tmp/fixture.html" <<HTML
             "fallback fold to H2 folds H2 section"
           );
           assertChildrenUnmutated("fallback-fixture");
+
+          const fallbackRootId = fallbackContainer.getAttribute(
+            "data-cursor-md-fold-root"
+          );
+          fallbackContainer.remove();
+          hooks.renderAll();
+          assert(
+            !document.querySelector(
+              '.cursor-md-heading-fold-toolbar[data-cursor-md-fold-toolbar-for="' +
+                fallbackRootId +
+                '"]'
+            ),
+            "removed preview container cleans up generated toolbar"
+          );
+          assert(
+            !document.querySelector(
+              '.cursor-md-heading-fold-style[data-cursor-md-fold-style-for="' +
+                fallbackRootId +
+                '"]'
+            ),
+            "removed preview container cleans up generated style"
+          );
         } catch (error) {
           fail(error && error.stack ? error.stack : String(error));
         }
@@ -601,6 +688,7 @@ HTML
 
 if ! grep -q 'data-test-result="PASS"' "$tmp/dom.html"; then
   cat "$tmp/chrome.err" >&2
-  sed -n '/heading-folding-test-result/,/<\/pre>/p' "$tmp/dom.html" >&2
+  sed -n '/<pre id="heading-folding-test-result"/,/<\/pre>/p' "$tmp/dom.html" >&2
+  tail -n 80 "$tmp/dom.html" >&2
   exit 1
 fi

@@ -82,6 +82,7 @@ HTML
   grep -q -- "--cursor-inline-markdown-editor-font-size: 15px" "$tmp/workbench.html"
   grep -q -- "cursor-markdown-preview-patch.js" "$tmp/workbench.html"
   grep -q -- "cursorMarkdownPreviewFrontmatter" "$tmp/cursor-markdown-preview-patch.js"
+  grep -q -- "cursorMarkdownPreviewHeadingFolds" "$tmp/cursor-markdown-preview-patch.js"
   grep -qE -- "<script src=\"\\./cursor-markdown-preview-patch\\.js\\?v=[0-9-]+\"></script>" "$tmp/workbench.html"
   ! grep -q "hotpink" "$tmp/workbench.html"
   ! grep -q "SESSION-ID old" "$tmp/workbench.html"
@@ -110,6 +111,47 @@ HTML
     "$1/patch" --font-size 18 >/dev/null
 
   grep -q -- "--cursor-inline-markdown-editor-font-size: 18px" "$tmp/workbench.html"
+' _ "$SCRIPT_DIR"
+
+check "patch Trusted Types repair fixture" bash -c '
+  set -euo pipefail
+  tmp=$(mktemp -d)
+  trap "rm -rf \"$tmp\"" EXIT
+
+  mkdir -p "$tmp/home/Library/Application Support/Cursor/User"
+  cat > "$tmp/home/Library/Application Support/Cursor/User/settings.json" <<JSON
+{
+  "editor.fontSize": 15
+}
+JSON
+
+  cat > "$tmp/workbench.html" <<HTML
+<!DOCTYPE html>
+<html>
+<head>
+<meta
+  http-equiv="Content-Security-Policy"
+  content="
+    require-trusted-types-for
+      '\''script'\''
+    ;
+    trusted-types
+      amdLoader
+      solidjs
+    ;
+  "/>
+</head>
+<body></body>
+</html>
+HTML
+
+  HOME="$tmp/home" CURSOR_WORKBENCH_HTML="$tmp/workbench.html" \
+    "$1/patch" >/dev/null
+
+  grep -q -- "streamingMarkdownPolicy" "$tmp/workbench.html"
+  grep -q -- "mermaidDiagram2" "$tmp/workbench.html"
+  grep -q -- "mermaidDiagramOuter" "$tmp/workbench.html"
+  grep -q -- "cursorMarkdownPreviewHeadingFolds" "$tmp/cursor-markdown-preview-patch.js"
 ' _ "$SCRIPT_DIR"
 
 check "patch CSS font-size fixture" bash -c '
@@ -213,6 +255,7 @@ HTML
 
   cat > "$tmp/cursor-markdown-preview-patch.js" <<JS
 window.cursorMarkdownPreviewFrontmatter = true;
+window.cursorMarkdownPreviewHeadingFolds = true;
 JS
 
   cat > "$tmp/fail-if-called" <<SH
@@ -256,6 +299,7 @@ cat > "\$CURSOR_WORKBENCH_HTML" <<HTML
 HTML
 cat > "\$(dirname "\$CURSOR_WORKBENCH_HTML")/cursor-markdown-preview-patch.js" <<JS
 window.cursorMarkdownPreviewFrontmatter = true;
+window.cursorMarkdownPreviewHeadingFolds = true;
 JS
 SH
   chmod +x "$tmp/fake-patch"
@@ -269,6 +313,7 @@ SH
   test -f "$tmp/patch-called"
   grep -q "VSCODE-CUSTOM-CSS-START" "$tmp/workbench.html"
   grep -q "cursorMarkdownPreviewFrontmatter" "$tmp/cursor-markdown-preview-patch.js"
+  grep -q "cursorMarkdownPreviewHeadingFolds" "$tmp/cursor-markdown-preview-patch.js"
 ' _ "$SCRIPT_DIR"
 
 check "ensure-patched patches ShipIt update fixture" bash -c '
@@ -300,6 +345,7 @@ cat > "\$CURSOR_WORKBENCH_HTML" <<HTML
 HTML
 cat > "\$(dirname "\$CURSOR_WORKBENCH_HTML")/cursor-markdown-preview-patch.js" <<JS
 window.cursorMarkdownPreviewFrontmatter = true;
+window.cursorMarkdownPreviewHeadingFolds = true;
 JS
 SH
   chmod +x "$tmp/fake-patch"
@@ -315,6 +361,7 @@ SH
   test -f "$tmp/patch-called"
   grep -q "VSCODE-CUSTOM-CSS-START" "$workbench_dir/workbench.html"
   grep -q "cursorMarkdownPreviewFrontmatter" "$workbench_dir/cursor-markdown-preview-patch.js"
+  grep -q "cursorMarkdownPreviewHeadingFolds" "$workbench_dir/cursor-markdown-preview-patch.js"
 ' _ "$SCRIPT_DIR"
 
 check "ensure-patched real patch fixture" bash -c '
@@ -345,6 +392,7 @@ HTML
 
   grep -q -- "--cursor-inline-markdown-editor-font-size: 18px" "$tmp/workbench.html"
   grep -q "cursorMarkdownPreviewFrontmatter" "$tmp/cursor-markdown-preview-patch.js"
+  grep -q "cursorMarkdownPreviewHeadingFolds" "$tmp/cursor-markdown-preview-patch.js"
   backup_count=$(find "$tmp/backups" -path "*/workbench.html" -type f | wc -l | tr -d " ")
   [[ "$backup_count" == "1" ]]
 

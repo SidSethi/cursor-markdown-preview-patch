@@ -17,7 +17,13 @@ readonly CURSOR_HOME_APP_BUNDLE="${CURSOR_HOME_APP_BUNDLE:-$HOME/Applications/Cu
 readonly JS_OUTPUT_NAME="cursor-markdown-preview-patch.js"
 readonly START_MARKER="<!-- !! VSCODE-CUSTOM-CSS-START !! -->"
 readonly END_MARKER="<!-- !! VSCODE-CUSTOM-CSS-END !! -->"
-readonly JS_VERIFY_TOKEN="cursorMarkdownPreviewFrontmatter"
+readonly JS_VERIFY_TOKEN_FRONTMATTER="cursorMarkdownPreviewFrontmatter"
+readonly JS_VERIFY_TOKEN_HEADING_FOLDS="cursorMarkdownPreviewHeadingFolds"
+readonly -a TRUSTED_TYPES_POLICY_NAMES=(
+  "streamingMarkdownPolicy"
+  "mermaidDiagram2"
+  "mermaidDiagramOuter"
+)
 
 print_script_usage() {
   cat <<'USAGE' >&2
@@ -112,6 +118,7 @@ find_workbench_htmls() {
 is_patch_present() {
   local workbench_html="$1"
   local managed_js
+  local policy
   managed_js="$(dirname "$workbench_html")/$JS_OUTPUT_NAME"
 
   [[ -f "$workbench_html" ]] &&
@@ -119,7 +126,15 @@ is_patch_present() {
     grep -qF "$END_MARKER" "$workbench_html" &&
     grep -qF "$JS_OUTPUT_NAME" "$workbench_html" &&
     [[ -f "$managed_js" ]] &&
-    grep -qF "$JS_VERIFY_TOKEN" "$managed_js"
+    grep -qF "$JS_VERIFY_TOKEN_FRONTMATTER" "$managed_js" &&
+    grep -qF "$JS_VERIFY_TOKEN_HEADING_FOLDS" "$managed_js" ||
+    return 1
+
+  if grep -qF "trusted-types" "$workbench_html"; then
+    for policy in "${TRUSTED_TYPES_POLICY_NAMES[@]}"; do
+      grep -qF -- "$policy" "$workbench_html" || return 1
+    done
+  fi
 }
 
 main() {
