@@ -12,14 +12,20 @@ in the repo.
 
 - `README.md` is the canonical project documentation.
 - `patch`, `rollback`, `ensure-patched`, `install-auto-reapply`,
-  `verify-auto-reapply`, `custom.css`, `custom.js`, `runner/`, `launchd/`,
-  `tests/`, and `test.sh` are the live implementation surface.
-- `ARCHIVE-2026-05-14-frontmatter-rendering-postmortem.md` is historical
+  `verify-auto-reapply`, `test.sh`, `preview/`, `lib/`, `auto-reapply/`, and
+  `tests/` are the live implementation surface.
+- `preview/custom.css` and `preview/custom.js` are the injected preview
+  customization/runtime.
+- `lib/cursor-patch-common.sh` holds shared patch-system constants, path
+  discovery, and verification helpers.
+- `auto-reapply/runner/` and `auto-reapply/launchd/` hold macOS auto-reapply
+  support assets used by the root auto-reapply commands.
+- `docs/archive/frontmatter-rendering-postmortem-2026-05-14.md` is historical
   context only.
-- `ARCHIVE-2026-06-02-heading-folding-plan.md` is historical context only; the
-  implemented heading-folding behavior is documented in `README.md` and the
+- `docs/archive/heading-folding-plan-2026-06-02.md` is historical context only;
+  the implemented heading-folding behavior is documented in `README.md` and the
   live source/tests.
-- `AUTO-REAPPLY.md` is the auto-reapply design and verification runbook.
+- `docs/auto-reapply.md` is the auto-reapply design and verification runbook.
 
 ## Safety Boundaries
 
@@ -41,10 +47,10 @@ in the repo.
 
 ## Change Guidance
 
-- Keep `custom.css` valid standalone CSS; Cursor may open and validate it
+- Keep `preview/custom.css` valid standalone CSS; Cursor may open and validate it
   directly.
-- Keep `custom.js` as a same-origin asset loaded from `workbench.html`; Cursor's
-  CSP blocks inline script injection.
+- Keep `preview/custom.js` as a same-origin asset loaded from `workbench.html`;
+  Cursor's CSP blocks inline script injection.
 - Avoid mutating Cursor's ProseMirror document nodes. The intended model is:
   detect frontmatter and headings, insert generated UI outside the editable
   subtree, and use CSS for visual folding.
@@ -65,6 +71,7 @@ in the repo.
   proven; report clearly that it modified and restored the live Cursor app.
 - For shell-only edits, at minimum run:
   ```bash
+  bash -n lib/cursor-patch-common.sh
   bash -n patch
   bash -n rollback
   bash -n ensure-patched
@@ -73,7 +80,7 @@ in the repo.
   ```
 - For JavaScript edits, run:
   ```bash
-  node --check custom.js
+  node --check preview/custom.js
   ```
 - Report whether verification touched only fixtures or also modified the live
   Cursor app.

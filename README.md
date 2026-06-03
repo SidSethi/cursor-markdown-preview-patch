@@ -29,13 +29,16 @@ cursor-inline-markdown-preview-patch
 
 To see changes, reload Cursor with `Developer: Reload Window` or restart Cursor.
 
-By default, the script sets the preview base font size to match Cursor's current `editor.fontSize`. Edit `custom.css` for styling changes, edit `custom.js` for frontmatter or heading-folding behavior changes, then re-run `./patch` and reload Cursor.
+By default, the script sets the preview base font size to match Cursor's current
+`editor.fontSize`. Edit `preview/custom.css` for styling changes, edit
+`preview/custom.js` for frontmatter or heading-folding behavior changes, then
+re-run `./patch` and reload Cursor.
 
 You can choose how the font-size variable is rendered:
 
 ```bash
 ./patch --font-size editor # default: use Cursor editor.fontSize
-./patch --font-size css    # use the value already written in custom.css
+./patch --font-size css    # use the value already written in preview/custom.css
 ./patch --font-size 18     # inject 18px
 ```
 
@@ -107,7 +110,7 @@ The LaunchAgent watches:
 The example app-backed plist is:
 
 ```text
-launchd/com.example.cursor-markdown-preview-patch.ensure.plist
+auto-reapply/launchd/com.example.cursor-markdown-preview-patch.ensure.plist
 ```
 
 `./install-auto-reapply` writes the live plist for this machine. To inspect it:
@@ -144,8 +147,8 @@ To find Cursor's current bundle id:
 defaults read /Applications/Cursor.app/Contents/Info CFBundleIdentifier
 ```
 
-See [AUTO-REAPPLY.md](./AUTO-REAPPLY.md) for the design notes, tradeoffs, and
-multi-machine considerations.
+See [docs/auto-reapply.md](./docs/auto-reapply.md) for the design notes,
+tradeoffs, and multi-machine considerations.
 
 To restore the previous backed-up workbench:
 
@@ -159,12 +162,29 @@ On Sid's dotfiles-managed machines, prefer the stable rollback wrapper:
 cursor-inline-markdown-preview-rollback
 ```
 
+## Architecture
+
+The repo has four small subsystems:
+
+- Root scripts are the public command surface: `patch`, `rollback`,
+  `ensure-patched`, `install-auto-reapply`, `verify-auto-reapply`, and
+  `test.sh`.
+- `preview/` is the injected preview customization/runtime. These files define
+  the CSS and JavaScript behavior installed into Cursor's workbench.
+- `lib/` is shared patch-system mechanics: constants, workbench discovery,
+  managed asset paths, Trusted Types policy checks, and patch-present
+  verification.
+- `auto-reapply/` contains macOS support assets used by the root auto-reapply
+  commands.
+
 ## Files
 
 - `patch`
   - Bash script that backs up and patches Cursor's `workbench.html`.
-  - Reads Cursor's `editor.fontSize` and renders the CSS with that value.
-  - Installs `custom.js` as `cursor-markdown-preview-patch.js` next to Cursor's `workbench.html`, because Cursor's CSP blocks inline scripts.
+  - Reads Cursor's `editor.fontSize` and renders `preview/custom.css` with that
+    value.
+  - Installs `preview/custom.js` as `cursor-markdown-preview-patch.js` next to
+    Cursor's `workbench.html`, because Cursor's CSP blocks inline scripts.
   - Repairs known Cursor Trusted Types policy names in stale clean workbench bases before injecting, then verifies them when a `trusted-types` CSP is present.
   - Can be re-run to apply changes.
 - `rollback`
@@ -184,14 +204,21 @@ cursor-inline-markdown-preview-rollback
     and restores manually on failure.
   - Verifies managed markers, JS feature tokens, and repaired Trusted Types policies after the LaunchAgent run.
   - Uses the same app-bundle workbench path candidates as the patch script.
-- `runner/`
-  - Swift source for the local app that runs `ensure-patched`.
-- `launchd/`
-  - Example app-backed per-user LaunchAgent plist for macOS auto-reapply.
-- `custom.css`
+- `lib/`
+  - Shared patch-system constants and read-only helpers for Cursor workbench
+    discovery, managed asset paths, Trusted Types policy checks, and
+    patch-presence verification.
+- `preview/custom.css`
   - CSS source for Cursor's editable rendered Markdown preview, rendered frontmatter table, and heading-folding controls.
-- `custom.js`
+- `preview/custom.js`
   - JavaScript source that recognizes leading YAML frontmatter in Cursor's rendered Markdown DOM, replaces the raw render with a compact metadata table, and adds visual heading folding in the editable Markdown preview.
+- `auto-reapply/runner/`
+  - Swift source for the local app that runs `ensure-patched`.
+- `auto-reapply/launchd/`
+  - Example app-backed per-user LaunchAgent plist for macOS auto-reapply.
+- `docs/`
+  - Auto-reapply runbook, live heading-folding test note, and historical archive
+    notes.
 - `tests/`
   - Browser fixture coverage for the injected frontmatter and heading-folding
     runtime.
@@ -227,30 +254,37 @@ The script inserts a managed block before `</html>` in Cursor's workbench file:
 <!-- !! VSCODE-CUSTOM-CSS-END !! -->
 ```
 
-The script removes any previous managed block before writing a new one, so it is safe to rerun after editing `custom.css`, editing `custom.js`, or after Cursor updates. The query string is a cache buster so an existing Cursor renderer reloads the current JS asset after a live reapply.
+The script removes any previous managed block before writing a new one, so it is
+safe to rerun after editing `preview/custom.css`, editing `preview/custom.js`, or
+after Cursor updates. The query string is a cache buster so an existing Cursor
+renderer reloads the current JS asset after a live reapply.
 
 Before injection, `patch` also repairs the current known Cursor Trusted Types policy names in the workbench CSP if the base `workbench.html` has a `trusted-types` directive. This protects against a stale clean backup being restored after Cursor's JavaScript bundle has started using newer policy names.
 
-`custom.css` stays valid CSS. Instead of using invalid template tokens, `patch` can rewrite this custom property in the temporary injected copy:
+`preview/custom.css` stays valid CSS. Instead of using invalid template tokens,
+`patch` can rewrite this custom property in the temporary injected copy:
 
 ```css
 --cursor-inline-markdown-editor-font-size: 13px;
 ```
 
-The value in `custom.css` is used directly when running `./patch --font-size css`. Otherwise, the injected value is read from Cursor's user setting or from an explicit numeric `--font-size` value:
+The value in `preview/custom.css` is used directly when running
+`./patch --font-size css`. Otherwise, the injected value is read from Cursor's
+user setting or from an explicit numeric `--font-size` value:
 
 ```json
 "editor.fontSize": 13
 ```
 
-This is a snapshot at patch time. It does not live-update if you later change `editor.fontSize` or `custom.css`. Rerun `./patch` and reload Cursor.
+This is a snapshot at patch time. It does not live-update if you later change
+`editor.fontSize` or `preview/custom.css`. Rerun `./patch` and reload Cursor.
 
 ### Frontmatter rendering
 
-`custom.js` watches Cursor's editable Markdown preview for the rendered shape of
-leading YAML frontmatter. When it sees a document begin with a `---` block, it
-hides Cursor's raw rendered nodes and inserts a compact table inspired by
-GitHub's Markdown frontmatter preview.
+`preview/custom.js` watches Cursor's editable Markdown preview for the rendered
+shape of leading YAML frontmatter. When it sees a document begin with a `---`
+block, it hides Cursor's raw rendered nodes and inserts a compact table inspired
+by GitHub's Markdown frontmatter preview.
 
 For example:
 
@@ -269,12 +303,12 @@ so normal document editing stays focused on the Markdown body.
 
 ### Heading folding
 
-`custom.js` also watches headings in Cursor's native editable Markdown preview.
-For each direct heading child inside the editable ProseMirror document, it
-derives the section range from that heading to the next heading of the same or
-shallower level. The level resolver prefers real heading semantics, then falls
-back to common rich-text level hints and computed heading size if Cursor changes
-the rendered DOM shape.
+`preview/custom.js` also watches headings in Cursor's native editable Markdown
+preview. For each direct heading child inside the editable ProseMirror document,
+it derives the section range from that heading to the next heading of the same
+or shallower level. The level resolver prefers real heading semantics, then
+falls back to common rich-text level hints and computed heading size if Cursor
+changes the rendered DOM shape.
 
 The fold model is visual-only and session-local:
 
@@ -317,8 +351,8 @@ unfolds that heading and every descendant heading inside it without unfolding
 peer sections.
 
 A real Command Palette integration is deliberately deferred because the current
-`custom.js` injection does not have a proven low-risk command registration bridge
-into Cursor's workbench.
+`preview/custom.js` injection does not have a proven low-risk command
+registration bridge into Cursor's workbench.
 
 If the toolbar does not appear in an already-open Cursor window after reapplying
 the patch, open the Markdown file in a fresh Cursor window or fully restart
@@ -366,10 +400,22 @@ The rollback script uses the same `CURSOR_WORKBENCH_PATCH_BACKUP_ROOT` override.
 
 Read-only historical notes:
 
-- [2026-05-14 frontmatter rendering postmortem](./ARCHIVE-2026-05-14-frontmatter-rendering-postmortem.md)
-- [2026-06-02 heading-folding implementation plan](./ARCHIVE-2026-06-02-heading-folding-plan.md)
+- [2026-05-14 frontmatter rendering postmortem](./docs/archive/frontmatter-rendering-postmortem-2026-05-14.md)
+- [2026-06-02 heading-folding implementation plan](./docs/archive/heading-folding-plan-2026-06-02.md)
 
 ## Verification and version support
+
+Current fixture-only restructure verification was run on 2026-06-03:
+
+- `bash -n lib/cursor-patch-common.sh patch rollback ensure-patched install-auto-reapply verify-auto-reapply test.sh tests/heading-folding-browser-fixture.sh`: passed
+- `node --check preview/custom.js`: passed
+- `plutil -lint auto-reapply/launchd/com.example.cursor-markdown-preview-patch.ensure.plist`: passed
+- `swiftc -parse auto-reapply/runner/CursorMarkdownPreviewPatchEnsure.swift`: passed
+- `./test.sh`: 26 passed, 0 failed
+- `shellcheck lib/cursor-patch-common.sh patch rollback ensure-patched install-auto-reapply verify-auto-reapply test.sh tests/heading-folding-browser-fixture.sh`: passed
+- `git diff --check`: passed
+- This run used fixture validation only. It did not run `./patch`,
+  `./rollback`, or `./verify-auto-reapply` against the live Cursor app bundle.
 
 Baseline auto-reapply verification was run locally against this checkout on 2026-05-26:
 

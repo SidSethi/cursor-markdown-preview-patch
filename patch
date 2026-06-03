@@ -8,24 +8,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly CSS_TEMPLATE="$SCRIPT_DIR/custom.css"
-readonly JS_TEMPLATE="$SCRIPT_DIR/custom.js"
-readonly JS_OUTPUT_NAME="cursor-markdown-preview-patch.js"
+
+# shellcheck source=lib/cursor-patch-common.sh
+source "$SCRIPT_DIR/lib/cursor-patch-common.sh"
+
+readonly CSS_TEMPLATE="$CURSOR_PATCH_CSS_TEMPLATE"
+readonly JS_TEMPLATE="$CURSOR_PATCH_JS_TEMPLATE"
 readonly CURSOR_SETTINGS="$HOME/Library/Application Support/Cursor/User/settings.json"
 readonly BACKUP_ROOT="${CURSOR_WORKBENCH_PATCH_BACKUP_ROOT:-$HOME/Library/Application Support/Cursor/workbench-patch-backups}"
-readonly DEFAULT_EDITOR_FONT_SIZE="13"
-readonly CSS_FONT_SIZE_PROPERTY="--cursor-inline-markdown-editor-font-size"
-readonly JS_VERIFY_TOKEN_FRONTMATTER="cursorMarkdownPreviewFrontmatter"
-readonly JS_VERIFY_TOKEN_HEADING_FOLDS="cursorMarkdownPreviewHeadingFolds"
-readonly -a TRUSTED_TYPES_POLICY_NAMES=(
-  "streamingMarkdownPolicy"
-  "mermaidDiagram2"
-  "mermaidDiagramOuter"
-)
-
-readonly START_MARKER="<!-- !! VSCODE-CUSTOM-CSS-START !! -->"
-readonly END_MARKER="<!-- !! VSCODE-CUSTOM-CSS-END !! -->"
-readonly SESSION_MARKER_PREFIX="<!-- !! VSCODE-CUSTOM-CSS-SESSION-ID"
 
 PATCH_TMP_DIR=""
 
@@ -34,16 +24,16 @@ print_script_usage() {
   cat <<'USAGE' >&2
 Usage: patch [--font-size editor|css|NUMBER]
 
-Patches Cursor.app's workbench.html with custom.css and installs custom.js as a
-same-origin workbench asset. Re-run after Cursor updates overwrite the app
-bundle.
+Patches Cursor.app's workbench.html with preview/custom.css and installs
+preview/custom.js as a same-origin workbench asset. Re-run after Cursor updates
+overwrite the app bundle.
 
 Options:
   --font-size editor
     Read Cursor's editor.fontSize setting and inject that px value. This is the
     default.
   --font-size css
-    Use the font-size variable exactly as written in custom.css.
+    Use the font-size variable exactly as written in preview/custom.css.
   --font-size NUMBER
     Inject NUMBER as px, for example --font-size 18.
 
@@ -57,11 +47,6 @@ USAGE
 die() {
   echo "error: $*" >&2
   exit 1
-}
-
-# Return success when the input is an integer or decimal number.
-is_number() {
-  [[ "${1:-}" =~ ^[0-9]+([.][0-9]+)?$ ]]
 }
 
 # Parse command-line options and print the selected font-size mode.
@@ -86,39 +71,11 @@ parse_font_size_mode() {
     esac
   done
 
-  if [[ "$mode" == "editor" || "$mode" == "css" ]] || is_number "$mode"; then
+  if [[ "$mode" == "editor" || "$mode" == "css" ]] || cursor_patch_is_number "$mode"; then
     printf '%s\n' "$mode"
   else
     die "invalid --font-size value: $mode"
   fi
-}
-
-# Locate Cursor's workbench.html, with an envvar override for tests.
-find_workbench_html() {
-  local path
-
-  # Test hook: patch this file instead of the real Cursor.app bundle.
-  if [[ -n "${CURSOR_WORKBENCH_HTML:-}" ]]; then
-    [[ -f "$CURSOR_WORKBENCH_HTML" ]] || return 1
-    printf '%s\n' "$CURSOR_WORKBENCH_HTML"
-    return 0
-  fi
-
-  local candidates=(
-    "/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-sandbox/workbench/workbench.html"
-    "$HOME/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-sandbox/workbench/workbench.html"
-    "/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html"
-    "$HOME/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html"
-  )
-
-  for path in "${candidates[@]}"; do
-    if [[ -f "$path" ]]; then
-      printf '%s\n' "$path"
-      return 0
-    fi
-  done
-
-  return 1
 }
 
 # Read Cursor's editor.fontSize setting, falling back to DEFAULT_EDITOR_FONT_SIZE.
@@ -126,13 +83,13 @@ read_editor_font_size() {
   local value
 
   if [[ ! -f "$CURSOR_SETTINGS" ]]; then
-    printf '%s\n' "$DEFAULT_EDITOR_FONT_SIZE"
+    printf '%s\n' "$CURSOR_PATCH_DEFAULT_EDITOR_FONT_SIZE"
     return
   fi
 
   if command -v jq >/dev/null 2>&1; then
     value=$(jq -r '."editor.fontSize" // empty' "$CURSOR_SETTINGS" 2>/dev/null || true)
-    if is_number "$value"; then
+    if cursor_patch_is_number "$value"; then
       printf '%s\n' "$value"
       return
     fi
@@ -143,15 +100,15 @@ read_editor_font_size() {
       head -n 1
   )
 
-  if is_number "$value"; then
+  if cursor_patch_is_number "$value"; then
     printf '%s\n' "$value"
   else
-    printf '%s\n' "$DEFAULT_EDITOR_FONT_SIZE"
+    printf '%s\n' "$CURSOR_PATCH_DEFAULT_EDITOR_FONT_SIZE"
   fi
 }
 
 # Render the source CSS to stdout, optionally substituting the font-size
-# variable without modifying custom.css itself.
+# variable without modifying preview/custom.css itself.
 render_css() {
   local font_size_px="$1"
 
@@ -163,7 +120,7 @@ render_css() {
   fi
 
   PATCH_FONT_SIZE_PX="$font_size_px" \
-    PATCH_CSS_FONT_SIZE_PROPERTY="$CSS_FONT_SIZE_PROPERTY" \
+    PATCH_CSS_FONT_SIZE_PROPERTY="$CURSOR_PATCH_CSS_FONT_SIZE_PROPERTY" \
     perl -pe '
       BEGIN {
         $property = quotemeta($ENV{"PATCH_CSS_FONT_SIZE_PROPERTY"});
@@ -184,28 +141,6 @@ remove_existing_patch() {
   ' "$source_html" > "$cleaned_html"
 }
 
-# Cursor sometimes adds Trusted Types policies in workbench JS before a fresh
-# clean backup exists. Preserve startup by allowing the known current policies.
-repair_trusted_types_policies() {
-  local source_html="$1"
-  local repaired_html="$2"
-  local policies
-  policies="$(printf '%s\n' "${TRUSTED_TYPES_POLICY_NAMES[@]}")"
-
-  PATCH_TRUSTED_TYPES_POLICIES="$policies" perl -0pe '
-    @policies = grep { length } split /\n/, $ENV{"PATCH_TRUSTED_TYPES_POLICIES"};
-    s/(\n\s*trusted-types\s+)(.*?)(\n\s*;\s*)/
-      my ($prefix, $body, $suffix) = ($1, $2, $3);
-      for my $policy (@policies) {
-        if ($body !~ m{(^|\s)\Q$policy\E(?=\s|$)}) {
-          $body .= "\n\t\t\t\t\t$policy";
-        }
-      }
-      "$prefix$body$suffix";
-    /egs;
-  ' "$source_html" > "$repaired_html"
-}
-
 # Build the HTML block that will be injected into workbench.html.
 build_injection_block() {
   local session_id="$1"
@@ -213,13 +148,13 @@ build_injection_block() {
   local block_html="$3"
 
   {
-    printf '%s %s !! -->\n' "$SESSION_MARKER_PREFIX" "$session_id"
-    printf '%s\n' "$START_MARKER"
+    printf '%s %s !! -->\n' "$CURSOR_PATCH_SESSION_MARKER_PREFIX" "$session_id"
+    printf '%s\n' "$CURSOR_PATCH_START_MARKER"
     printf '<style>\n'
     cat "$rendered_css"
     printf '\n</style>\n'
-    printf '<script src="./%s?v=%s"></script>\n' "$JS_OUTPUT_NAME" "$session_id"
-    printf '%s\n' "$END_MARKER"
+    printf '<script src="./%s?v=%s"></script>\n' "$CURSOR_PATCH_JS_OUTPUT_NAME" "$session_id"
+    printf '%s\n' "$CURSOR_PATCH_END_MARKER"
   } > "$block_html"
 }
 
@@ -246,28 +181,6 @@ insert_block_before_closing_html() {
   ' "$cleaned_html" > "$patched_html"
 }
 
-# Confirm the patched workbench contains the expected managed markers and assets.
-verify_patch() {
-  local workbench_html="$1"
-  local managed_js="$2"
-  local policy
-
-  grep -qF "$START_MARKER" "$workbench_html" &&
-    grep -qF "$END_MARKER" "$workbench_html" &&
-    grep -qF -- "$CSS_FONT_SIZE_PROPERTY" "$workbench_html" &&
-    grep -qF -- "$JS_OUTPUT_NAME" "$workbench_html" &&
-    [[ -f "$managed_js" ]] &&
-    grep -qF -- "$JS_VERIFY_TOKEN_FRONTMATTER" "$managed_js" &&
-    grep -qF -- "$JS_VERIFY_TOKEN_HEADING_FOLDS" "$managed_js" ||
-    return 1
-
-  if grep -qF "trusted-types" "$workbench_html"; then
-    for policy in "${TRUSTED_TYPES_POLICY_NAMES[@]}"; do
-      grep -qF -- "$policy" "$workbench_html" || return 1
-    done
-  fi
-}
-
 # Print a unique backup directory path for this patch run.
 create_backup_dir() {
   local session_id="$1"
@@ -289,7 +202,7 @@ main() {
   font_size_mode="$(parse_font_size_mode "$@")"
 
   local workbench_html
-  workbench_html=$(find_workbench_html) ||
+  workbench_html=$(cursor_patch_find_primary_workbench_html) ||
     die "Cursor workbench.html not found in known locations"
   [[ -f "$JS_TEMPLATE" ]] || die "JS file not found: $JS_TEMPLATE"
 
@@ -299,7 +212,7 @@ main() {
     font_size_label="editor.fontSize -> $font_size_px"
   elif [[ "$font_size_mode" == "css" ]]; then
     font_size_px="css"
-    font_size_label="custom.css"
+    font_size_label="preview/custom.css"
   else
     font_size_px="${font_size_mode}px"
     font_size_label="--font-size -> $font_size_px"
@@ -330,7 +243,7 @@ main() {
 
   render_css "$font_size_px" > "$rendered_css"
   remove_existing_patch "$workbench_html" "$cleaned_html"
-  repair_trusted_types_policies "$cleaned_html" "$repaired_html"
+  cursor_patch_repair_trusted_types_policies "$cleaned_html" "$repaired_html"
   build_injection_block "$session_id" "$rendered_css" "$block_html"
 
   insert_block_before_closing_html "$repaired_html" "$block_html" "$patched_html" || {
@@ -339,7 +252,7 @@ main() {
   }
 
   local managed_js
-  managed_js="$(dirname "$workbench_html")/$JS_OUTPUT_NAME"
+  managed_js="$(cursor_patch_managed_js_path "$workbench_html")"
 
   if ! cp "$JS_TEMPLATE" "$managed_js"; then
     echo "backup retained at: $backup_path" >&2
@@ -351,7 +264,7 @@ main() {
     die "failed to write Cursor workbench.html; grant App Management permission to the app running this script, or run it from a terminal that already has that permission"
   fi
 
-  if ! verify_patch "$workbench_html" "$managed_js"; then
+  if ! cursor_patch_is_verified "$workbench_html"; then
     cp -p "$backup_path" "$workbench_html"
     die "marker verification failed; restored backup"
   fi

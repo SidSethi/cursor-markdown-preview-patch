@@ -22,34 +22,35 @@ check() {
 }
 
 echo "=== Syntax ==="
+check "shared shell library syntax" bash -n "$SCRIPT_DIR/lib/cursor-patch-common.sh"
 check "patch syntax" bash -n "$SCRIPT_DIR/patch"
 check "rollback syntax" bash -n "$SCRIPT_DIR/rollback"
 check "ensure-patched syntax" bash -n "$SCRIPT_DIR/ensure-patched"
 check "install-auto-reapply syntax" bash -n "$SCRIPT_DIR/install-auto-reapply"
 check "verify-auto-reapply syntax" bash -n "$SCRIPT_DIR/verify-auto-reapply"
 if command -v node >/dev/null 2>&1; then
-  check "custom JS syntax" node --check "$SCRIPT_DIR/custom.js"
+  check "custom JS syntax" node --check "$SCRIPT_DIR/preview/custom.js"
 fi
 if command -v swiftc >/dev/null 2>&1; then
-  check "runner Swift syntax" swiftc -parse "$SCRIPT_DIR/runner/CursorMarkdownPreviewPatchEnsure.swift"
+  check "runner Swift syntax" swiftc -parse "$SCRIPT_DIR/auto-reapply/runner/CursorMarkdownPreviewPatchEnsure.swift"
 fi
 if command -v plutil >/dev/null 2>&1; then
-  check "LaunchAgent example plist syntax" plutil -lint "$SCRIPT_DIR/launchd/com.example.cursor-markdown-preview-patch.ensure.plist"
+  check "LaunchAgent example plist syntax" plutil -lint "$SCRIPT_DIR/auto-reapply/launchd/com.example.cursor-markdown-preview-patch.ensure.plist"
 fi
 check "CSS has no template tokens" bash -c '
-  ! grep -q "{{" "$1/custom.css"
+  ! grep -q "{{" "$1/preview/custom.css"
 ' _ "$SCRIPT_DIR"
 check "CSS has font-size variable" bash -c '
-  grep -q -- "--cursor-inline-markdown-editor-font-size:" "$1/custom.css"
+  grep -q -- "--cursor-inline-markdown-editor-font-size:" "$1/preview/custom.css"
 ' _ "$SCRIPT_DIR"
 check "JS has frontmatter marker" bash -c '
-  grep -q -- "cursorMarkdownPreviewFrontmatter" "$1/custom.js"
+  grep -q -- "cursorMarkdownPreviewFrontmatter" "$1/preview/custom.js"
 ' _ "$SCRIPT_DIR"
 check "JS has heading fold marker" bash -c '
-  grep -q -- "cursorMarkdownPreviewHeadingFolds" "$1/custom.js"
+  grep -q -- "cursorMarkdownPreviewHeadingFolds" "$1/preview/custom.js"
 ' _ "$SCRIPT_DIR"
 check "CSS has heading fold toolbar" bash -c '
-  grep -q -- "cursor-md-heading-fold-toolbar" "$1/custom.css"
+  grep -q -- "cursor-md-heading-fold-toolbar" "$1/preview/custom.css"
 ' _ "$SCRIPT_DIR"
 
 echo "=== Fixtures ==="
@@ -173,7 +174,7 @@ JSON
 </html>
 HTML
 
-  expected=$(sed -nE "s/^[[:space:]]*--cursor-inline-markdown-editor-font-size:[[:space:]]*([^;]+);.*/\\1/p" "$1/custom.css" | head -n 1)
+  expected=$(sed -nE "s/^[[:space:]]*--cursor-inline-markdown-editor-font-size:[[:space:]]*([^;]+);.*/\\1/p" "$1/preview/custom.css" | head -n 1)
   [[ -n "$expected" ]]
 
   HOME="$tmp/home" CURSOR_WORKBENCH_HTML="$tmp/workbench.html" \

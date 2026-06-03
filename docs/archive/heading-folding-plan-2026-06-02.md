@@ -4,7 +4,8 @@
 > native editable Markdown preview.
 
 Archived on 2026-06-02 after the heading-folding system was implemented and
-documented in `README.md`, `custom.js`, `custom.css`, and the fixture tests.
+documented in `README.md`, `preview/custom.js`, `preview/custom.css`, and the
+fixture tests.
 This file is useful design history, not the current source of truth.
 
 ---
@@ -330,7 +331,7 @@ This file is useful design history, not the current source of truth.
 
 **5a - Update styling**
 
-- [ ] **5.1** Keep `custom.css` valid standalone CSS.
+- [ ] **5.1** Keep `preview/custom.css` valid standalone CSS.
 - [ ] **5.2** Add restrained heading gutter styling.
 - [ ] **5.3** Add toolbar styling using Cursor theme variables.
 - [ ] **5.4** Avoid layout shifts beyond the heading gutter padding.
@@ -386,7 +387,7 @@ This file is useful design history, not the current source of truth.
 
 **Static checks**
 
-- [ ] `node --check custom.js`
+- [ ] `node --check preview/custom.js`
 - [ ] `bash tests/heading-folding-browser-fixture.sh`
 - [ ] `./test.sh`
 - [ ] `git diff --check`
@@ -468,7 +469,7 @@ This file is useful design history, not the current source of truth.
 - Empty heading sections have no fold marker and are ignored by bulk fold
   actions.
 - Fixture tests pass.
-- `node --check custom.js` passes.
+- `node --check preview/custom.js` passes.
 - `./test.sh` passes.
 - The final report states whether validation was fixture-only or included live Cursor.
 

@@ -7,19 +7,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 
+# shellcheck source=lib/cursor-patch-common.sh
+source "$SCRIPT_DIR/lib/cursor-patch-common.sh"
+
 readonly LABEL="${CURSOR_MARKDOWN_PREVIEW_PATCH_LABEL:-com.sidsethi.cursor-markdown-preview-patch.ensure}"
 DOMAIN="gui/$(id -u)"
 readonly DOMAIN
 readonly SERVICE="$DOMAIN/$LABEL"
-readonly JS_OUTPUT_NAME="cursor-markdown-preview-patch.js"
-readonly START_MARKER="<!-- !! VSCODE-CUSTOM-CSS-START !! -->"
-readonly JS_VERIFY_TOKEN_FRONTMATTER="cursorMarkdownPreviewFrontmatter"
-readonly JS_VERIFY_TOKEN_HEADING_FOLDS="cursorMarkdownPreviewHeadingFolds"
-readonly -a TRUSTED_TYPES_POLICY_NAMES=(
-  "streamingMarkdownPolicy"
-  "mermaidDiagram2"
-  "mermaidDiagramOuter"
-)
 readonly POLL_SECONDS="${CURSOR_MARKDOWN_PREVIEW_PATCH_VERIFY_POLL_SECONDS:-90}"
 readonly POLL_INTERVAL_SECONDS="${CURSOR_MARKDOWN_PREVIEW_PATCH_VERIFY_POLL_INTERVAL_SECONDS:-2}"
 readonly RESTORE_ON_FAILURE="${CURSOR_MARKDOWN_PREVIEW_PATCH_VERIFY_RESTORE_ON_FAILURE:-1}"
@@ -29,57 +23,8 @@ die() {
   exit 1
 }
 
-find_workbench_html() {
-  local path
-
-  if [[ -n "${CURSOR_WORKBENCH_HTML:-}" ]]; then
-    [[ -f "$CURSOR_WORKBENCH_HTML" ]] || return 1
-    printf '%s\n' "$CURSOR_WORKBENCH_HTML"
-    return 0
-  fi
-
-  local candidates=(
-    "/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-sandbox/workbench/workbench.html"
-    "$HOME/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-sandbox/workbench/workbench.html"
-    "/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html"
-    "$HOME/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html"
-  )
-
-  for path in "${candidates[@]}"; do
-    if [[ -f "$path" ]]; then
-      printf '%s\n' "$path"
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-WORKBENCH_HTML="$(find_workbench_html || true)"
+WORKBENCH_HTML="$(cursor_patch_find_primary_workbench_html || true)"
 readonly WORKBENCH_HTML
-MANAGED_JS=""
-if [[ -n "$WORKBENCH_HTML" ]]; then
-  MANAGED_JS="$(dirname "$WORKBENCH_HTML")/$JS_OUTPUT_NAME"
-fi
-readonly MANAGED_JS
-
-is_patch_present() {
-  local policy
-
-  [[ -f "$WORKBENCH_HTML" ]] &&
-    grep -qF "$START_MARKER" "$WORKBENCH_HTML" &&
-    grep -qF "$JS_OUTPUT_NAME" "$WORKBENCH_HTML" &&
-    [[ -f "$MANAGED_JS" ]] &&
-    grep -qF "$JS_VERIFY_TOKEN_FRONTMATTER" "$MANAGED_JS" &&
-    grep -qF "$JS_VERIFY_TOKEN_HEADING_FOLDS" "$MANAGED_JS" ||
-    return 1
-
-  if grep -qF "trusted-types" "$WORKBENCH_HTML"; then
-    for policy in "${TRUSTED_TYPES_POLICY_NAMES[@]}"; do
-      grep -qF -- "$policy" "$WORKBENCH_HTML" || return 1
-    done
-  fi
-}
 
 launchd_value() {
   local pattern="$1"
@@ -113,7 +58,7 @@ main() {
   launchctl print "$SERVICE" >/dev/null 2>&1 || die "LaunchAgent is not loaded: $SERVICE"
 
   echo "Checking starting state..."
-  if is_patch_present; then
+  if cursor_patch_is_present "$WORKBENCH_HTML"; then
     echo "OK: patch is currently present."
   else
     echo "WARN: patch is not present before verification."
@@ -126,7 +71,7 @@ main() {
   echo "Rolling back patch to simulate a Cursor update..."
   CURSOR_WORKBENCH_HTML="$WORKBENCH_HTML" "$SCRIPT_DIR/rollback"
 
-  if is_patch_present; then
+  if cursor_patch_is_present "$WORKBENCH_HTML"; then
     die "rollback completed but patch still appears present"
   fi
   echo "OK: rollback removed managed patch."
@@ -157,7 +102,7 @@ main() {
   echo "LaunchAgent state:       ${state:-unknown}"
   echo "LaunchAgent last exit:   ${last_exit:-unknown}"
 
-  if [[ "$last_exit" == "0" ]] && is_patch_present; then
+  if [[ "$last_exit" == "0" ]] && cursor_patch_is_present "$WORKBENCH_HTML"; then
     echo "OK: auto-reapply restored the patch."
     exit 0
   fi

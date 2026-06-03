@@ -13,7 +13,7 @@
   - same workbench directory receives `cursor-markdown-preview-patch.js`
 - Patch implementation:
   - `patch` injects a managed CSS/JS block before `</html>`
-  - `patch` copies `custom.js` into Cursor's workbench directory
+  - `patch` copies `preview/custom.js` into Cursor's workbench directory
   - `patch` removes an older managed block before reinjecting
   - `patch` repairs known Cursor Trusted Types policy names in stale clean
     workbench bases before injecting
@@ -30,8 +30,8 @@
   - `ensure-patched`
   - `install-auto-reapply`
   - `verify-auto-reapply`
-  - `runner/CursorMarkdownPreviewPatchEnsure.swift`
-  - `launchd/com.example.cursor-markdown-preview-patch.ensure.plist`
+  - `auto-reapply/runner/CursorMarkdownPreviewPatchEnsure.swift`
+  - `auto-reapply/launchd/com.example.cursor-markdown-preview-patch.ensure.plist`
   - `test.sh` fixture coverage for patched, unpatched, and locked runs
 - Current machine evidence checked on 2026-05-26:
   - Cursor bundle id: `com.todesktop.230313mzl4w4u92`
@@ -152,7 +152,7 @@ Installed path:
 
 Source:
 
-- `runner/CursorMarkdownPreviewPatchEnsure.swift`
+- `auto-reapply/runner/CursorMarkdownPreviewPatchEnsure.swift`
 
 Installer:
 
@@ -195,7 +195,7 @@ Live label on this machine:
 
 Example plist:
 
-- `launchd/com.example.cursor-markdown-preview-patch.ensure.plist`
+- `auto-reapply/launchd/com.example.cursor-markdown-preview-patch.ensure.plist`
 
 Install location:
 
@@ -340,12 +340,12 @@ launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.sidsethi.cursor
    - supports `CURSOR_MARKDOWN_PREVIEW_PATCH_CMD` for wrapper commands
    - no Cursor reload or UI scripting
 
-2. `launchd/com.example.cursor-markdown-preview-patch.ensure.plist`
+2. `auto-reapply/launchd/com.example.cursor-markdown-preview-patch.ensure.plist`
    - public example with placeholder absolute paths
    - runs the local runner app executable directly
    - logs launchd's own output under `~/Library/Logs/cursor-markdown-preview-patch/`
 
-3. `runner/CursorMarkdownPreviewPatchEnsure.swift`
+3. `auto-reapply/runner/CursorMarkdownPreviewPatchEnsure.swift`
    - small LSUIElement app runner
    - launches `ensure-patched`
    - writes durable logs

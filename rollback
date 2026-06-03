@@ -4,8 +4,13 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+
+# shellcheck source=lib/cursor-patch-common.sh
+source "$SCRIPT_DIR/lib/cursor-patch-common.sh"
+
 readonly BACKUP_ROOT="${CURSOR_WORKBENCH_PATCH_BACKUP_ROOT:-$HOME/Library/Application Support/Cursor/workbench-patch-backups}"
-readonly JS_OUTPUT_NAME="cursor-markdown-preview-patch.js"
 
 # Print the script's command-line help text.
 print_script_usage() {
@@ -28,47 +33,11 @@ die() {
   exit 1
 }
 
-# Locate Cursor's workbench.html, with an envvar override for tests.
-find_workbench_html() {
-  local path
-
-  # Test hook: restore this file instead of the real Cursor.app bundle.
-  if [[ -n "${CURSOR_WORKBENCH_HTML:-}" ]]; then
-    [[ -f "$CURSOR_WORKBENCH_HTML" ]] || return 1
-    printf '%s\n' "$CURSOR_WORKBENCH_HTML"
-    return 0
-  fi
-
-  local candidates=(
-    "/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-sandbox/workbench/workbench.html"
-    "$HOME/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-sandbox/workbench/workbench.html"
-    "/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html"
-    "$HOME/Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html"
-  )
-
-  for path in "${candidates[@]}"; do
-    if [[ -f "$path" ]]; then
-      printf '%s\n' "$path"
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-# Return success when a workbench backup does not contain this managed patch.
-is_clean_backup() {
-  local backup_path="$1"
-
-  ! grep -qF "$JS_OUTPUT_NAME" "$backup_path" &&
-    ! grep -qF "VSCODE-CUSTOM-CSS-START" "$backup_path"
-}
-
 # Print the newest clean backup path under BACKUP_ROOT.
 latest_clean_backup() {
   local backup
   while IFS= read -r backup; do
-    if is_clean_backup "$backup"; then
+    if cursor_patch_is_clean_backup "$backup"; then
       printf '%s\n' "$backup"
       return 0
     fi
@@ -85,7 +54,7 @@ main() {
   fi
 
   local workbench_html backup_path
-  workbench_html=$(find_workbench_html) ||
+  workbench_html=$(cursor_patch_find_primary_workbench_html) ||
     die "Cursor workbench.html not found in known locations"
 
   if [[ $# -eq 1 ]]; then
@@ -99,8 +68,8 @@ main() {
 
   cp -p "$backup_path" "$workbench_html"
 
-  if ! grep -qF "$JS_OUTPUT_NAME" "$workbench_html"; then
-    rm -f "$(dirname "$workbench_html")/$JS_OUTPUT_NAME"
+  if ! grep -qF "$CURSOR_PATCH_JS_OUTPUT_NAME" "$workbench_html"; then
+    rm -f "$(cursor_patch_managed_js_path "$workbench_html")"
   fi
 
   cat <<EOF

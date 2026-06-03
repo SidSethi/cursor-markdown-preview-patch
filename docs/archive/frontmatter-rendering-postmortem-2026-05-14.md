@@ -53,7 +53,7 @@ The next step was JavaScript, inserted directly into the managed `workbench.html
 
 Cursor's CSP blocked inline scripts. That explained why CSS changes could visibly apply while the frontmatter table did not appear: the script was present in the patched HTML but never ran.
 
-The fix was to install `custom.js` as a same-origin asset next to `workbench.html`:
+The fix was to install `preview/custom.js` as a same-origin asset next to `workbench.html`:
 
 ```text
 /Applications/Cursor.app/Contents/Resources/app/out/vs/code/electron-sandbox/workbench/cursor-markdown-preview-patch.js
@@ -85,7 +85,7 @@ The final approach splits responsibilities:
 
 ### JavaScript Responsibilities
 
-`custom.js` watches for Cursor's editable Markdown preview container:
+`preview/custom.js` watches for Cursor's editable Markdown preview container:
 
 ```text
 .markdown-editor-react__richtext-content
@@ -132,7 +132,7 @@ cursor-md-has-frontmatter
 
 ### CSS Responsibilities
 
-`custom.css` styles the table and uses structural selectors to visually collapse the raw frontmatter nodes:
+`preview/custom.css` styles the table and uses structural selectors to visually collapse the raw frontmatter nodes:
 
 ```css
 .markdown-editor-react__richtext-content.cursor-md-has-frontmatter

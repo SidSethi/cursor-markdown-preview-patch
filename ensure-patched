@@ -9,21 +9,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
+
+# shellcheck source=lib/cursor-patch-common.sh
+source "$SCRIPT_DIR/lib/cursor-patch-common.sh"
+
 readonly PATCH_CMD="${CURSOR_MARKDOWN_PREVIEW_PATCH_CMD:-$SCRIPT_DIR/patch}"
 readonly LOCK_DIR="${CURSOR_MARKDOWN_PREVIEW_PATCH_LOCK_DIR:-${TMPDIR:-/tmp}/cursor-markdown-preview-patch.ensure.lock}"
 readonly DEBOUNCE_SECONDS="${CURSOR_MARKDOWN_PREVIEW_PATCH_DEBOUNCE_SECONDS:-20}"
-readonly CURSOR_APP_BUNDLE="${CURSOR_APP_BUNDLE:-/Applications/Cursor.app}"
-readonly CURSOR_HOME_APP_BUNDLE="${CURSOR_HOME_APP_BUNDLE:-$HOME/Applications/Cursor.app}"
-readonly JS_OUTPUT_NAME="cursor-markdown-preview-patch.js"
-readonly START_MARKER="<!-- !! VSCODE-CUSTOM-CSS-START !! -->"
-readonly END_MARKER="<!-- !! VSCODE-CUSTOM-CSS-END !! -->"
-readonly JS_VERIFY_TOKEN_FRONTMATTER="cursorMarkdownPreviewFrontmatter"
-readonly JS_VERIFY_TOKEN_HEADING_FOLDS="cursorMarkdownPreviewHeadingFolds"
-readonly -a TRUSTED_TYPES_POLICY_NAMES=(
-  "streamingMarkdownPolicy"
-  "mermaidDiagram2"
-  "mermaidDiagramOuter"
-)
 
 print_script_usage() {
   cat <<'USAGE' >&2
@@ -56,87 +48,6 @@ die() {
   exit 1
 }
 
-cursor_bundle_id() {
-  if [[ -d "$CURSOR_APP_BUNDLE" ]] && command -v defaults >/dev/null 2>&1; then
-    defaults read "$CURSOR_APP_BUNDLE/Contents/Info" CFBundleIdentifier 2>/dev/null || true
-  fi
-}
-
-find_app_workbench_htmls() {
-  local app_bundle path
-
-  local app_bundles=(
-    "$CURSOR_APP_BUNDLE"
-    "$CURSOR_HOME_APP_BUNDLE"
-  )
-
-  for app_bundle in "${app_bundles[@]}"; do
-    local candidates=(
-      "$app_bundle/Contents/Resources/app/out/vs/code/electron-sandbox/workbench/workbench.html"
-      "$app_bundle/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.html"
-    )
-
-    for path in "${candidates[@]}"; do
-      if [[ -f "$path" ]]; then
-        printf '%s\n' "$path"
-      fi
-    done
-  done
-}
-
-find_shipit_workbench_htmls() {
-  local shipit_dir="${CURSOR_SHIPIT_DIR:-}"
-
-  if [[ -z "$shipit_dir" ]]; then
-    local bundle_id
-    bundle_id="$(cursor_bundle_id)"
-    [[ -n "$bundle_id" ]] || return 0
-    shipit_dir="$HOME/Library/Caches/$bundle_id.ShipIt"
-  fi
-
-  [[ -d "$shipit_dir" ]] || return 0
-
-  find "$shipit_dir" \
-    -path '*/Cursor.app/Contents/Resources/app/out/vs/code/*/workbench/workbench.html' \
-    -type f 2>/dev/null | sort
-}
-
-find_workbench_htmls() {
-
-  if [[ -n "${CURSOR_WORKBENCH_HTML:-}" ]]; then
-    [[ -f "$CURSOR_WORKBENCH_HTML" ]] || return 1
-    printf '%s\n' "$CURSOR_WORKBENCH_HTML"
-    return 0
-  fi
-
-  {
-    find_shipit_workbench_htmls
-    find_app_workbench_htmls
-  } | awk '!seen[$0]++'
-}
-
-is_patch_present() {
-  local workbench_html="$1"
-  local managed_js
-  local policy
-  managed_js="$(dirname "$workbench_html")/$JS_OUTPUT_NAME"
-
-  [[ -f "$workbench_html" ]] &&
-    grep -qF "$START_MARKER" "$workbench_html" &&
-    grep -qF "$END_MARKER" "$workbench_html" &&
-    grep -qF "$JS_OUTPUT_NAME" "$workbench_html" &&
-    [[ -f "$managed_js" ]] &&
-    grep -qF "$JS_VERIFY_TOKEN_FRONTMATTER" "$managed_js" &&
-    grep -qF "$JS_VERIFY_TOKEN_HEADING_FOLDS" "$managed_js" ||
-    return 1
-
-  if grep -qF "trusted-types" "$workbench_html"; then
-    for policy in "${TRUSTED_TYPES_POLICY_NAMES[@]}"; do
-      grep -qF -- "$policy" "$workbench_html" || return 1
-    done
-  fi
-}
-
 main() {
   if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     print_script_usage
@@ -156,7 +67,7 @@ main() {
   local workbench_targets=()
   while IFS= read -r workbench_html; do
     workbench_targets+=("$workbench_html")
-  done < <(find_workbench_htmls)
+  done < <(cursor_patch_find_workbench_htmls)
 
   if [[ "${#workbench_targets[@]}" -eq 0 ]]; then
     die "Cursor workbench.html not found in known locations"
@@ -164,7 +75,7 @@ main() {
 
   local missing_targets=()
   for workbench_html in "${workbench_targets[@]}"; do
-    if is_patch_present "$workbench_html"; then
+    if cursor_patch_is_present "$workbench_html"; then
       echo "OK: patch already present in $workbench_html"
     else
       missing_targets+=("$workbench_html")
@@ -187,7 +98,7 @@ main() {
       continue
     fi
 
-    if is_patch_present "$workbench_html"; then
+    if cursor_patch_is_present "$workbench_html"; then
       echo "OK: Cursor Markdown preview patch ensured in $workbench_html."
     else
       echo "WARN: patch command completed, but managed markers were not found in $workbench_html" >&2

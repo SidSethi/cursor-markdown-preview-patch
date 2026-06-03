@@ -34,11 +34,11 @@ trap 'rm -rf "$tmp"' EXIT
 
 custom_js_url="$(
   node -e 'const { pathToFileURL } = require("url"); process.stdout.write(pathToFileURL(process.argv[1]).href);' \
-    "$REPO_DIR/custom.js"
+    "$REPO_DIR/preview/custom.js"
 )"
 custom_css_url="$(
   node -e 'const { pathToFileURL } = require("url"); process.stdout.write(pathToFileURL(process.argv[1]).href);' \
-    "$REPO_DIR/custom.css"
+    "$REPO_DIR/preview/custom.css"
 )"
 fixture_url="$(
   node -e 'const { pathToFileURL } = require("url"); process.stdout.write(pathToFileURL(process.argv[1]).href);' \
