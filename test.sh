@@ -52,6 +52,9 @@ check "JS has heading fold marker" bash -c '
 check "CSS has heading fold toolbar" bash -c '
   grep -q -- "cursor-md-heading-fold-toolbar" "$1/preview/custom.css"
 ' _ "$SCRIPT_DIR"
+check "CSS has heading level label gutter" bash -c '
+  grep -q -- "--cursor-md-heading-level-label" "$1/preview/custom.css"
+' _ "$SCRIPT_DIR"
 
 echo "=== Fixtures ==="
 check "patch fixture" bash -c '

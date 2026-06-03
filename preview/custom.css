@@ -148,9 +148,12 @@
   > :is(h1, h2, h3, h4, h5, h6, [role="heading"]),
 .tiptap.ProseMirror.cursor-md-has-heading-folds
   > :is(h1, h2, h3, h4, h5, h6, [role="heading"]) {
+  --cursor-md-heading-gutter-width: clamp(58px, 2.45em, 112px);
+  --cursor-md-heading-label-width: clamp(36px, 1.55em, 72px);
+
   box-sizing: border-box;
-  margin-left: -1.35em;
-  padding-left: 1.35em;
+  margin-left: calc(-1 * var(--cursor-md-heading-gutter-width));
+  padding-left: var(--cursor-md-heading-gutter-width);
   position: relative;
 }
 
@@ -160,21 +163,52 @@
 .tiptap.ProseMirror.cursor-md-has-heading-folds
   > :is(h1, h2, h3, h4, h5, h6, [role="heading"])::before {
   color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
-  content: var(--cursor-md-heading-fold-marker, "");
+  content: var(--cursor-md-heading-level-label, "");
   cursor: pointer;
   display: block;
-  font-size: 0.75em;
-  font-weight: 500;
-  left: 0.15em;
-  line-height: 1;
-  opacity: var(--cursor-md-heading-fold-marker-opacity, 0);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  left: 0;
+  letter-spacing: 0;
+  line-height: inherit;
+  opacity: 0.42;
   pointer-events: auto;
   position: absolute;
-  text-align: center;
-  top: 0.35em;
+  text-align: right;
+  top: 0;
   transition: opacity 120ms ease;
   user-select: none;
-  width: 1em;
+  width: var(--cursor-md-heading-label-width);
+  -webkit-user-select: none;
+}
+
+.cursor-md-has-heading-folds
+  .tiptap.ProseMirror
+  > :is(h1, h2, h3, h4, h5, h6, [role="heading"])::after,
+.tiptap.ProseMirror.cursor-md-has-heading-folds
+  > :is(h1, h2, h3, h4, h5, h6, [role="heading"])::after {
+  align-items: center;
+  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+  content: var(--cursor-md-heading-fold-marker, "");
+  cursor: pointer;
+  display: flex;
+  font-size: 0.68em;
+  font-weight: 600;
+  height: 1.3em;
+  justify-content: flex-start;
+  left: var(--cursor-md-heading-label-width);
+  line-height: 1;
+  opacity: var(--cursor-md-heading-fold-marker-opacity, 0);
+  padding-left: 0.35em;
+  pointer-events: auto;
+  position: absolute;
+  top: 0.12em;
+  transition: opacity 120ms ease;
+  user-select: none;
+  width: calc(
+    var(--cursor-md-heading-gutter-width) - var(--cursor-md-heading-label-width)
+  );
   -webkit-user-select: none;
 }
 
@@ -188,8 +222,22 @@
   > :is(h1, h2, h3, h4, h5, h6, [role="heading"]):hover::before,
 .tiptap.ProseMirror.cursor-md-has-heading-folds
   > :is(h1, h2, h3, h4, h5, h6, [role="heading"]):focus-within::before {
-  color: var(--vscode-textLink-foreground, var(--vscode-editor-foreground));
-  opacity: 0.85;
+  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+  opacity: 0.68;
+}
+
+.cursor-md-has-heading-folds
+  .tiptap.ProseMirror
+  > :is(h1, h2, h3, h4, h5, h6, [role="heading"]):hover::after,
+.cursor-md-has-heading-folds
+  .tiptap.ProseMirror
+  > :is(h1, h2, h3, h4, h5, h6, [role="heading"]):focus-within::after,
+.tiptap.ProseMirror.cursor-md-has-heading-folds
+  > :is(h1, h2, h3, h4, h5, h6, [role="heading"]):hover::after,
+.tiptap.ProseMirror.cursor-md-has-heading-folds
+  > :is(h1, h2, h3, h4, h5, h6, [role="heading"]):focus-within::after {
+  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+  opacity: 0.88;
 }
 
 /*

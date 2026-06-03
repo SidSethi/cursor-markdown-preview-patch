@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cursor Markdown Heading Gutter Mockup</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #1f1f1f;
+      --panel: #252526;
+      --panel-2: #2d2d30;
+      --border: #3e3e42;
+      --text: #d4d4d4;
+      --muted: #858585;
+      --subtle: #5f646b;
+      --accent: #4fa3ff;
+      --heading: #cccccc;
+      --body: #c8c8c8;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      margin: 0;
+    }
+
+    main {
+      margin: 0 auto;
+      max-width: 1280px;
+      padding: 28px;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    .page-title {
+      align-items: end;
+      display: flex;
+      gap: 16px;
+      justify-content: space-between;
+      margin-bottom: 22px;
+    }
+
+    .page-title h1 {
+      color: var(--heading);
+      font-size: 22px;
+      font-weight: 650;
+      letter-spacing: 0;
+      line-height: 1.2;
+    }
+
+    .page-title p {
+      color: var(--muted);
+      max-width: 720px;
+    }
+
+    .comparison {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .panel-header {
+      align-items: center;
+      background: var(--panel-2);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      min-height: 38px;
+      padding: 8px 12px;
+    }
+
+    .panel-header h2 {
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.2;
+    }
+
+    .panel-header span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.2;
+    }
+
+    .editor-shell {
+      background: #1e1e1e;
+      min-height: 620px;
+      padding: 34px 34px 42px;
+    }
+
+    .preview {
+      margin: 0 auto;
+      max-width: 760px;
+    }
+
+    .preview h1,
+    .preview h2,
+    .preview h3 {
+      color: var(--heading);
+      letter-spacing: 0;
+      margin: 0 0 18px;
+      position: relative;
+    }
+
+    .preview h1 {
+      font-size: 42px;
+      font-weight: 700;
+      line-height: 1.12;
+      margin-top: 8px;
+    }
+
+    .preview h2 {
+      font-size: 27px;
+      font-weight: 650;
+      line-height: 1.2;
+      margin-top: 30px;
+    }
+
+    .preview h3 {
+      font-size: 22px;
+      font-weight: 650;
+      line-height: 1.25;
+      margin-top: 26px;
+    }
+
+    .preview p,
+    .preview li {
+      color: var(--body);
+      font-size: 15px;
+      line-height: 1.55;
+      margin: 0 0 14px;
+    }
+
+    .preview ul {
+      margin: 0 0 18px;
+      padding-left: 22px;
+    }
+
+    .current h1,
+    .current h2,
+    .current h3 {
+      margin-left: -1.35em;
+      padding-left: 1.35em;
+    }
+
+    .current h1::before,
+    .current h2::before,
+    .current h3::before {
+      color: var(--muted);
+      content: "-";
+      cursor: pointer;
+      font-size: 0.75em;
+      font-weight: 500;
+      left: 0.15em;
+      line-height: 1;
+      opacity: 0;
+      position: absolute;
+      text-align: center;
+      top: 0.35em;
+      width: 1em;
+    }
+
+    .current h2.active::before,
+    .current h3.collapsed::before,
+    .current h1:hover::before,
+    .current h2:hover::before,
+    .current h3:hover::before {
+      color: var(--accent);
+      opacity: 0.85;
+    }
+
+    .current h3.collapsed::before {
+      content: "+";
+    }
+
+    .proposed {
+      --heading-gutter-width: 96px;
+      --heading-label-width: 56px;
+
+      padding-left: var(--heading-gutter-width);
+    }
+
+    .proposed h1,
+    .proposed h2,
+    .proposed h3 {
+      margin-left: calc(-1 * var(--heading-gutter-width));
+      padding-left: var(--heading-gutter-width);
+    }
+
+    .proposed h1::before,
+    .proposed h2::before,
+    .proposed h3::before {
+      color: var(--subtle);
+      content: attr(data-heading-level);
+      cursor: pointer;
+      font-size: 0.72em;
+      font-weight: inherit;
+      left: 0;
+      letter-spacing: 0;
+      line-height: inherit;
+      opacity: 0.55;
+      position: absolute;
+      text-align: right;
+      top: 0;
+      width: var(--heading-label-width);
+    }
+
+    .proposed h1::after,
+    .proposed h2::after,
+    .proposed h3::after {
+      align-items: center;
+      color: var(--muted);
+      content: attr(data-fold-marker);
+      cursor: pointer;
+      display: flex;
+      font-size: 0.68em;
+      font-weight: 600;
+      height: 1.3em;
+      justify-content: flex-start;
+      left: var(--heading-label-width);
+      line-height: 1;
+      opacity: 0;
+      padding-left: 0.35em;
+      position: absolute;
+      top: 0.12em;
+      width: calc(var(--heading-gutter-width) - var(--heading-label-width));
+    }
+
+    .proposed h1:hover::before,
+    .proposed h2:hover::before,
+    .proposed h3:hover::before,
+    .proposed h1:focus-within::before,
+    .proposed h2:focus-within::before,
+    .proposed h3:focus-within::before {
+      color: var(--muted);
+      opacity: 0.78;
+    }
+
+    .proposed h1:hover::after,
+    .proposed h2:hover::after,
+    .proposed h3:hover::after,
+    .proposed h1:focus-within::after,
+    .proposed h2:focus-within::after,
+    .proposed h3:focus-within::after {
+      color: var(--muted);
+      opacity: 0.88;
+    }
+
+    .proposed h3.collapsed::before {
+      opacity: 0.78;
+    }
+
+    .proposed h3.collapsed::after {
+      color: var(--muted);
+      content: "+";
+      opacity: 0.9;
+    }
+
+    .cursor-line {
+      display: inline-block;
+      position: relative;
+    }
+
+    .cursor-line::after {
+      background: var(--text);
+      content: "";
+      height: 1.1em;
+      margin-left: 2px;
+      position: absolute;
+      top: 0.08em;
+      width: 1px;
+    }
+
+    .note {
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 13px;
+      padding: 12px;
+    }
+
+    .legend {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 18px;
+    }
+
+    .legend-item {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      padding: 12px;
+    }
+
+    .legend-item strong {
+      color: var(--text);
+      display: block;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    @media (max-width: 900px) {
+      main {
+        padding: 18px;
+      }
+
+      .page-title {
+        align-items: start;
+        flex-direction: column;
+      }
+
+      .comparison,
+      .legend {
+        grid-template-columns: 1fr;
+      }
+
+      .editor-shell {
+        padding: 24px 22px 32px;
+      }
+
+      .preview h1 {
+        font-size: 34px;
+      }
+
+      .preview h2 {
+        font-size: 24px;
+      }
+
+      .preview h3 {
+        font-size: 20px;
+      }
+
+      .proposed {
+        --heading-gutter-width: 82px;
+        --heading-label-width: 48px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="page-title">
+      <div>
+        <h1>Heading Gutter Label Mockup</h1>
+        <p>
+          The right side shows the proposed behavior: the heading level is always visible in the left gutter,
+          while the fold marker remains a smaller hover or collapsed-state affordance.
+        </p>
+      </div>
+    </section>
+
+    <section class="comparison" aria-label="Heading gutter comparison">
+      <article class="panel">
+        <header class="panel-header">
+          <h2>Current fold marker</h2>
+          <span>Hover/caret only</span>
+        </header>
+        <div class="editor-shell">
+          <div class="preview current">
+            <h1>Project Notes</h1>
+            <p>The current gutter is optimized for a single fold marker.</p>
+            <h2 class="active">Implementation</h2>
+            <p>The marker appears near the heading when the heading is active or hovered.</p>
+            <h3>Runtime shape</h3>
+            <p>Generated controls stay outside the editable ProseMirror document.</p>
+            <h3 class="collapsed">Open questions</h3>
+            <p>Collapsed sections keep a visible plus marker.</p>
+          </div>
+        </div>
+        <p class="note">
+          This is close to the existing patch: a narrow gutter with a generated plus/minus marker.
+        </p>
+      </article>
+
+      <article class="panel">
+        <header class="panel-header">
+          <h2>Proposed heading label gutter</h2>
+          <span>Always visible</span>
+        </header>
+        <div class="editor-shell">
+          <div class="preview proposed">
+            <h1 data-heading-level="H1" data-fold-marker="-">Project Notes</h1>
+            <p>The heading label is visible even when the mouse and caret are elsewhere.</p>
+            <h2 data-heading-level="H2" data-fold-marker="-">
+              <span class="cursor-line">Implementation</span>
+            </h2>
+            <p>The label lives in the left padding, not in the text column.</p>
+            <h3 data-heading-level="H3" data-fold-marker="-">Runtime shape</h3>
+            <p>It inherits the heading scale and weight, then uses low contrast so it reads as structure.</p>
+            <h3 class="collapsed" data-heading-level="H3" data-fold-marker="+">Open questions</h3>
+            <p>This line represents content hidden by a collapsed heading.</p>
+          </div>
+        </div>
+        <p class="note">
+          The gutter needs to be wider than the current one because an H-level label is wider than a single marker.
+        </p>
+      </article>
+    </section>
+
+    <section class="legend" aria-label="Implementation notes">
+      <div class="legend-item">
+        <strong>Always-on label</strong>
+        `H1`, `H2`, and `H3` are structural hints, so they can stay visible at low opacity.
+      </div>
+      <div class="legend-item">
+        <strong>Fold marker</strong>
+        The smaller plus/minus marker can remain hover-sensitive, except collapsed headings keep `+` visible.
+      </div>
+      <div class="legend-item">
+        <strong>Body column</strong>
+        The heading text starts at the same x-position; the added UI lives in negative left margin.
+      </div>
+    </section>
+  </main>
+</body>
+</html>

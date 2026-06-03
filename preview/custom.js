@@ -682,6 +682,10 @@
     return toolbar;
   };
 
+  const removeGeneratedToolbar = (container, state) => {
+    findGeneratedToolbar(container, state)?.remove();
+  };
+
   const removeGeneratedElements = (container, state) => {
     if (!state) {
       return;
@@ -736,18 +740,21 @@
     const rootSelectors = getRootCssSelectors(state.rootId);
     const lines = [];
 
-    for (const section of sections.filter((entry) => entry.hasContent)) {
+    for (const section of sections) {
       const isCollapsed = state.collapsed.has(section.key);
       const marker = isCollapsed ? "+" : "-";
       const markerOpacity = isCollapsed ? "0.85" : "0";
+      const foldMarkerCss = section.hasContent
+        ? ` --cursor-md-heading-fold-marker: "${marker}"; --cursor-md-heading-fold-marker-opacity: ${markerOpacity};`
+        : "";
       lines.push(
         `${buildRuleSelector(
           rootSelectors,
           `> :nth-child(${section.headingChildNumber})`
-        )} { --cursor-md-heading-fold-marker: "${marker}"; --cursor-md-heading-fold-marker-opacity: ${markerOpacity}; }`
+        )} { --cursor-md-heading-level-label: "H${section.level}";${foldMarkerCss} }`
       );
 
-      if (isCollapsed) {
+      if (section.hasContent && isCollapsed) {
         lines.push(
           `${buildRuleSelector(
             rootSelectors,
@@ -1003,7 +1010,7 @@
     const sections = getHeadingSections(container);
     const foldableSections = sections.filter((section) => section.hasContent);
 
-    if (!foldableSections.length) {
+    if (!sections.length) {
       cleanupHeadingFolds(container);
       return;
     }
@@ -1021,7 +1028,11 @@
     container.setAttribute(rootAttribute, state.rootId);
     containersByFoldRootId.set(state.rootId, container);
 
-    renderHeadingFoldToolbar(container, state);
+    if (foldableSections.length) {
+      renderHeadingFoldToolbar(container, state);
+    } else {
+      removeGeneratedToolbar(container, state);
+    }
     renderHeadingFoldStyle(container, state, sections);
   };
 
@@ -1166,7 +1177,7 @@
 
     const paddingLeft =
       parseFloat(window.getComputedStyle?.(heading)?.paddingLeft || "0") || 0;
-    const gutterWidth = Math.min(36, Math.max(18, paddingLeft));
+    const gutterWidth = Math.min(128, Math.max(18, paddingLeft));
     return event.clientX <= rect.left + gutterWidth;
   };
 

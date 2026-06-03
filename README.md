@@ -217,8 +217,8 @@ The repo has four small subsystems:
 - `auto-reapply/launchd/`
   - Example app-backed per-user LaunchAgent plist for macOS auto-reapply.
 - `docs/`
-  - Auto-reapply runbook, live heading-folding test note, and historical archive
-    notes.
+  - Auto-reapply runbook, live heading-folding test note, heading gutter label
+    mockup, and historical archive notes.
 - `tests/`
   - Browser fixture coverage for the injected frontmatter and heading-folding
     runtime.
@@ -318,13 +318,17 @@ The fold model is visual-only and session-local:
 - It does not wrap, reorder, add classes to, or add inline styles to ProseMirror
   document children.
 
-In the preview, hover a heading to reveal its left-gutter marker, then click the
-marker to fold or unfold that section. The marker is positioned outside the
-normal text column, so headings do not shift horizontally when controls appear.
-Only headings with content get a fold marker or participate in bulk fold
-actions. Empty heading sections are left unmarked, and collapsed non-empty
-headings keep their `+` marker visible as a lightweight indicator that hidden
-content exists.
+In the preview, headings show an always-visible left-gutter level label such as
+`H1`, `H2`, or `H3`. The label uses the heading's resolved level and inherits
+the heading's typography with reduced contrast, so it reads as structure rather
+than document content. It is positioned outside the normal text column, so
+heading text does not shift horizontally.
+
+Headings with content also get a smaller fold marker in the same gutter. Hover a
+heading to reveal its `-` marker, then click the gutter to fold or unfold that
+section. Empty heading sections get the level label but no fold marker and do
+not participate in bulk fold actions. Collapsed non-empty headings keep their
+`+` marker visible as a lightweight indicator that hidden content exists.
 
 The injected toolbar supports:
 
@@ -405,17 +409,29 @@ Read-only historical notes:
 
 ## Verification and version support
 
-Current fixture-only restructure verification was run on 2026-06-03:
+Current heading gutter label verification was run on 2026-06-03:
 
 - `bash -n lib/cursor-patch-common.sh patch rollback ensure-patched install-auto-reapply verify-auto-reapply test.sh tests/heading-folding-browser-fixture.sh`: passed
 - `node --check preview/custom.js`: passed
-- `plutil -lint auto-reapply/launchd/com.example.cursor-markdown-preview-patch.ensure.plist`: passed
-- `swiftc -parse auto-reapply/runner/CursorMarkdownPreviewPatchEnsure.swift`: passed
-- `./test.sh`: 26 passed, 0 failed
+- `bash tests/heading-folding-browser-fixture.sh`: passed
+- `./test.sh`: 27 passed, 0 failed
 - `shellcheck lib/cursor-patch-common.sh patch rollback ensure-patched install-auto-reapply verify-auto-reapply test.sh tests/heading-folding-browser-fixture.sh`: passed
 - `git diff --check`: passed
-- This run used fixture validation only. It did not run `./patch`,
-  `./rollback`, or `./verify-auto-reapply` against the live Cursor app bundle.
+- Browser fixture coverage includes:
+  - always-visible generated `H1`/`H2`/`H3` gutter labels
+  - fold marker hit areas span the label-marker gutter gap
+  - label-marker gutter gap clicks still toggle foldable sections
+  - wide heading-label gutter clicks still toggle foldable sections
+  - empty headings get level labels but no fold marker or fold action
+  - single non-foldable headings get level labels without creating a toolbar
+- `./patch`: applied to the live Cursor app bundle after fixture verification
+- Live bundle marker check: installed `workbench.html` used
+  `cursor-markdown-preview-patch.js?v=20260603-110310`, and installed assets
+  contained the heading-label token, flex fold marker, and widened gutter
+  hit-test
+- Live backup from that apply:
+  `$HOME/Library/Application Support/Cursor/workbench-patch-backups/cursor-app-20260603-110310/workbench.html`
+- This run did not run `./rollback` or `./verify-auto-reapply`.
 
 Baseline auto-reapply verification was run locally against this checkout on 2026-05-26:
 

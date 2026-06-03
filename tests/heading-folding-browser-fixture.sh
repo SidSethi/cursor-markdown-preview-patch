@@ -115,6 +115,12 @@ cat > "$tmp/fixture.html" <<HTML
       </div>
     </div>
 
+    <div id="single-heading-fixture" class="markdown-editor-react__richtext-content">
+      <div class="tiptap ProseMirror" contenteditable="true">
+        <h1>Standalone</h1>
+      </div>
+    </div>
+
     <div id="same-tag-fixture" class="markdown-editor-react__richtext-content">
       <div class="tiptap ProseMirror" contenteditable="true">
         <h1 aria-level="1" style="font-size: 32px">Visual One</h1>
@@ -167,12 +173,16 @@ cat > "$tmp/fixture.html" <<HTML
           return text;
         }
 
-        const content = window.getComputedStyle(this, "::before").content;
-        const marker =
-          content && content !== "none" && content !== '""'
-            ? content.replace(/^"(.*)"$/, "\$1")
-            : "";
-        return marker ? marker + "\\n" + text : text;
+        const generatedContent = ["::before", "::after"]
+          .map((pseudoElement) => {
+            const content = window.getComputedStyle(this, pseudoElement).content;
+            return content && content !== "none" && content !== '""'
+              ? content.replace(/^"(.*)"$/, "\$1")
+              : "";
+          })
+          .filter(Boolean)
+          .join("\\n");
+        return generatedContent ? generatedContent + "\\n" + text : text;
       },
       set(value) {
         if (nativeInnerText?.set) {
@@ -189,6 +199,7 @@ cat > "$tmp/fixture.html" <<HTML
       "frontmatter-fixture",
       "non-leading-frontmatter-fixture",
       "empty-heading-fixture",
+      "single-heading-fixture",
       "same-tag-fixture",
       "promoted-toolbar-fixture",
       "fallback-fixture",
@@ -245,6 +256,16 @@ cat > "$tmp/fixture.html" <<HTML
           '.cursor-md-heading-fold-style[data-cursor-md-fold-style-for="' +
             rootId +
             '"]'
+        );
+      };
+
+      const getNthChildRule = (styleText, childNumber) => {
+        const marker = "> :nth-child(" + childNumber + ")";
+        return (
+          styleText
+            .split("\\n")
+            .find((line) => line.includes(marker) && !line.includes(":nth-child(n +")) ||
+          ""
         );
       };
 
@@ -332,6 +353,30 @@ cat > "$tmp/fixture.html" <<HTML
             !style.textContent.includes("padding-left"),
             "heading marker CSS does not shift heading text"
           );
+          assert(
+            style.textContent.includes('--cursor-md-heading-level-label: "H1"') &&
+              style.textContent.includes('--cursor-md-heading-level-label: "H2"') &&
+              style.textContent.includes('--cursor-md-heading-level-label: "H3"'),
+            "heading level labels generated"
+          );
+          const h2Style = window.getComputedStyle(root.children[2]);
+          const h2LabelStyle = window.getComputedStyle(
+            root.children[2],
+            "::before"
+          );
+          const h2MarkerStyle = window.getComputedStyle(
+            root.children[2],
+            "::after"
+          );
+          const h2GutterWidth = parseFloat(h2Style.paddingLeft);
+          const h2LabelWidth = parseFloat(h2LabelStyle.width);
+          const h2MarkerHitWidth = parseFloat(h2MarkerStyle.width);
+          assert(
+            h2MarkerStyle.display === "flex" &&
+              h2MarkerStyle.cursor === "pointer" &&
+              h2MarkerHitWidth >= h2GutterWidth - h2LabelWidth - 1,
+            "fold marker hit area spans label gap"
+          );
           assert(!root.contains(toolbar), "toolbar outside ProseMirror");
           assert(!root.contains(style), "style outside ProseMirror");
           assertChildrenUnmutated("fixture");
@@ -371,7 +416,7 @@ cat > "$tmp/fixture.html" <<HTML
             getOwnedStyle(container).textContent.includes(
               ":nth-child(n + 2):nth-child(-n + 8)"
             ),
-            "H1 fold survives rerender when innerText includes marker content"
+            "H1 fold survives rerender when innerText includes generated gutter content"
           );
           assertChildrenUnmutated("fixture");
 
@@ -379,6 +424,39 @@ cat > "$tmp/fixture.html" <<HTML
           assert(
             !getOwnedStyle(container).textContent.includes("display: none"),
             "legacy click-only H1 gutter handler still unfolds H1"
+          );
+
+          const labelGapOffset =
+            parseFloat(window.getComputedStyle(root.children[0], "::before").width) +
+            2;
+          clickHeadingGutter(root.children[0], labelGapOffset);
+          assert(
+            getOwnedStyle(container).textContent.includes(
+              ":nth-child(n + 2):nth-child(-n + 8)"
+            ),
+            "clicking label-marker gutter gap folds H1 content range"
+          );
+          legacyClickHeadingGutter(root.children[0], labelGapOffset);
+          assert(
+            !getOwnedStyle(container).textContent.includes("display: none"),
+            "label-marker gutter gap click-only handler unfolds H1"
+          );
+
+          const wideGutterOffset = Math.max(
+            42,
+            parseFloat(window.getComputedStyle(root.children[0]).paddingLeft) - 8
+          );
+          clickHeadingGutter(root.children[0], wideGutterOffset);
+          assert(
+            getOwnedStyle(container).textContent.includes(
+              ":nth-child(n + 2):nth-child(-n + 8)"
+            ),
+            "clicking wide heading label gutter folds H1 content range"
+          );
+          legacyClickHeadingGutter(root.children[0], wideGutterOffset);
+          assert(
+            !getOwnedStyle(container).textContent.includes("display: none"),
+            "wide heading label gutter click-only handler unfolds H1"
           );
 
           toolbar
@@ -532,8 +610,13 @@ cat > "$tmp/fixture.html" <<HTML
           const emptyStyle = getOwnedStyle(emptyContainer);
           assert(!!emptyToolbar, "empty-heading toolbar created");
           assert(!!emptyStyle, "empty-heading style created");
+          const emptyHeadingRule = getNthChildRule(emptyStyle.textContent, 3);
           assert(
-            !emptyStyle.textContent.includes("> :nth-child(3)"),
+            emptyHeadingRule.includes('--cursor-md-heading-level-label: "H2"'),
+            "empty heading receives heading level label"
+          );
+          assert(
+            !emptyHeadingRule.includes("--cursor-md-heading-fold-marker"),
             "empty heading has no fold marker rule"
           );
           const beforeEmptyClickCss = emptyStyle.textContent;
@@ -550,10 +633,41 @@ cat > "$tmp/fixture.html" <<HTML
           const emptyFoldCss = getOwnedStyle(emptyContainer).textContent;
           assert(
             emptyFoldCss.includes(":nth-child(n + 5):nth-child(-n + 5)") &&
-              !emptyFoldCss.includes("> :nth-child(3)"),
+              !getNthChildRule(emptyFoldCss, 3).includes("--cursor-md-heading-fold-marker"),
             "fold to H2 ignores empty heading and folds only contentful peer"
           );
           assertChildrenUnmutated("empty-heading-fixture");
+
+          const singleHeadingContainer =
+            document.getElementById("single-heading-fixture");
+          const singleHeadingRoot =
+            singleHeadingContainer.querySelector(".tiptap.ProseMirror");
+          const singleHeadingSections = hooks.getHeadingSections(
+            singleHeadingContainer
+          );
+          assert(
+            singleHeadingSections.length === 1 &&
+              singleHeadingSections[0].hasContent === false,
+            "single-heading fixture detects one non-foldable heading"
+          );
+          const singleHeadingToolbar = getOwnedToolbar(singleHeadingContainer);
+          const singleHeadingStyle = getOwnedStyle(singleHeadingContainer);
+          assert(!singleHeadingToolbar, "single-heading fixture does not create toolbar");
+          assert(!!singleHeadingStyle, "single-heading fixture creates label style");
+          assert(
+            getNthChildRule(singleHeadingStyle.textContent, 1).includes(
+              '--cursor-md-heading-level-label: "H1"'
+            ),
+            "single-heading fixture receives heading level label"
+          );
+          const beforeSingleHeadingClickCss = singleHeadingStyle.textContent;
+          clickHeadingGutter(singleHeadingRoot.children[0]);
+          assert(
+            getOwnedStyle(singleHeadingContainer).textContent ===
+              beforeSingleHeadingClickCss,
+            "single-heading gutter click does not fold"
+          );
+          assertChildrenUnmutated("single-heading-fixture");
 
           const sameTagContainer =
             document.getElementById("same-tag-fixture");
@@ -580,6 +694,12 @@ cat > "$tmp/fixture.html" <<HTML
           const sameTagStyle = getOwnedStyle(sameTagContainer);
           assert(!!sameTagToolbar, "same-tag toolbar created");
           assert(!!sameTagStyle, "same-tag style created");
+          assert(
+            sameTagStyle.textContent.includes('--cursor-md-heading-level-label: "H1"') &&
+              sameTagStyle.textContent.includes('--cursor-md-heading-level-label: "H2"') &&
+              sameTagStyle.textContent.includes('--cursor-md-heading-level-label: "H3"'),
+            "same-tag fixture generates visual heading level labels"
+          );
           assert(!sameTagRoot.contains(sameTagToolbar), "same-tag toolbar outside ProseMirror");
           assert(!sameTagRoot.contains(sameTagStyle), "same-tag style outside ProseMirror");
           clickHeadingGutter(sameTagRoot.children[0]);
