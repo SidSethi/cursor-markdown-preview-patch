@@ -69,6 +69,11 @@ cat > "$tmp/fixture.html" <<HTML
     .tiptap.ProseMirror > * {
       margin: 8px 0;
     }
+
+    .split-pane-fixture {
+      border-left: 1px solid #ccc;
+      width: 420px;
+    }
   </style>
 </head>
 <body>
@@ -157,6 +162,17 @@ cat > "$tmp/fixture.html" <<HTML
         <p>Fallback body</p>
       </div>
     </div>
+
+    <div id="split-pane-fixture" class="split-pane-fixture">
+      <div id="split-heading-fixture" class="markdown-editor-react__richtext-content">
+        <div class="tiptap ProseMirror" contenteditable="true">
+          <h1>Split One</h1>
+          <p>Split intro</p>
+          <h2>Split Two</h2>
+          <p>Split body</p>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -203,6 +219,7 @@ cat > "$tmp/fixture.html" <<HTML
       "same-tag-fixture",
       "promoted-toolbar-fixture",
       "fallback-fixture",
+      "split-heading-fixture",
     ]) {
       const root = document.querySelector("#" + id + " .tiptap.ProseMirror");
       window.__beforePatchSnapshots[id] = Array.from(root.children).map((node) => ({
@@ -269,9 +286,12 @@ cat > "$tmp/fixture.html" <<HTML
         );
       };
 
-      const clickHeadingGutter = (heading, xOffset = 8) => {
+      const clickHeadingLabel = (
+        heading,
+        xOffset = 8,
+        clickTarget = heading.parentElement || heading
+      ) => {
         const rect = heading.getBoundingClientRect();
-        const clickTarget = heading.parentElement || heading;
         const eventOptions = {
           bubbles: true,
           cancelable: true,
@@ -287,9 +307,12 @@ cat > "$tmp/fixture.html" <<HTML
           );
         }
       };
-      const legacyClickHeadingGutter = (heading, xOffset = 8) => {
+      const legacyClickHeadingLabel = (
+        heading,
+        xOffset = 8,
+        clickTarget = heading.parentElement || heading
+      ) => {
         const rect = heading.getBoundingClientRect();
-        const clickTarget = heading.parentElement || heading;
         clickTarget.dispatchEvent(
           new MouseEvent("click", {
             bubbles: true,
@@ -351,7 +374,7 @@ cat > "$tmp/fixture.html" <<HTML
           );
           assert(
             !style.textContent.includes("padding-left"),
-            "heading marker CSS does not shift heading text"
+            "heading label CSS does not shift heading text"
           );
           assert(
             style.textContent.includes('--cursor-md-heading-level-label: "H1"') &&
@@ -370,12 +393,41 @@ cat > "$tmp/fixture.html" <<HTML
           );
           const h2GutterWidth = parseFloat(h2Style.paddingLeft);
           const h2LabelWidth = parseFloat(h2LabelStyle.width);
-          const h2MarkerHitWidth = parseFloat(h2MarkerStyle.width);
+          const h2HeadingFontSize = parseFloat(h2Style.fontSize);
+          const h2LabelFontSize = parseFloat(h2LabelStyle.fontSize);
+          const h2HeadingHeight = root.children[2].getBoundingClientRect().height;
+          const h2LabelTop =
+            h2LabelStyle.top === "50%"
+              ? h2HeadingHeight / 2
+              : parseFloat(h2LabelStyle.top);
+          const h2LabelHeight = parseFloat(h2LabelStyle.height);
+          const h2LabelTransformY =
+            h2LabelStyle.transform === "none"
+              ? 0
+              : new DOMMatrixReadOnly(h2LabelStyle.transform).m42;
+          const h2LabelVisualCenter =
+            h2LabelTop + h2LabelTransformY + h2LabelHeight / 2;
           assert(
-            h2MarkerStyle.display === "flex" &&
-              h2MarkerStyle.cursor === "pointer" &&
-              h2MarkerHitWidth >= h2GutterWidth - h2LabelWidth - 1,
-            "fold marker hit area spans label gap"
+            h2LabelFontSize < h2HeadingFontSize &&
+              h2LabelFontSize >= 10 &&
+              h2LabelFontSize <= 16,
+            "heading level label font is downscaled"
+          );
+          assert(
+            h2GutterWidth <= 38 && h2LabelWidth < h2GutterWidth,
+            "heading level label gutter is compact"
+          );
+          assert(
+            h2LabelStyle.display === "flex" &&
+              h2LabelStyle.alignItems === "center" &&
+              h2LabelStyle.justifyContent === "flex-end" &&
+              h2LabelStyle.transform !== "none" &&
+              Math.abs(h2LabelVisualCenter - h2HeadingHeight / 2) <= 1,
+            "heading level label is vertically centered"
+          );
+          assert(
+            h2MarkerStyle.content === "none" || h2MarkerStyle.content === '""',
+            "heading fold plus/minus marker is not rendered"
           );
           assert(!root.contains(toolbar), "toolbar outside ProseMirror");
           assert(!root.contains(style), "style outside ProseMirror");
@@ -387,24 +439,29 @@ cat > "$tmp/fixture.html" <<HTML
           const directToggleSelection = window.getSelection();
           directToggleSelection.removeAllRanges();
           directToggleSelection.addRange(directToggleRange);
-          clickHeadingGutter(root.children[0]);
+          clickHeadingLabel(root.children[0]);
           assert(
-            !getOwnedStyle(container).textContent.includes(
+            getOwnedStyle(container).textContent.includes(
               ":nth-child(n + 2):nth-child(-n + 8)"
             ),
-            "clicking H1 gutter skips fold while selection is inside content"
+            "clicking H1 label folds even while selection is inside content"
           );
           hooks.renderAll();
           assert(
-            !getOwnedStyle(container).textContent.includes(
+            getOwnedStyle(container).textContent.includes(
               ":nth-child(n + 2):nth-child(-n + 8)"
             ),
-            "selection-protected direct fold remains skipped after rerender"
+            "selection-inside direct label fold survives rerender"
           );
           assertChildrenUnmutated("fixture");
+          legacyClickHeadingLabel(root.children[0]);
+          assert(
+            !getOwnedStyle(container).textContent.includes("display: none"),
+            "legacy click-only H1 label handler unfolds after selection-inside fold"
+          );
 
           directToggleSelection.removeAllRanges();
-          clickHeadingGutter(root.children[0]);
+          clickHeadingLabel(root.children[0]);
           assert(
             getOwnedStyle(container).textContent.includes(
               ":nth-child(n + 2):nth-child(-n + 8)"
@@ -420,43 +477,32 @@ cat > "$tmp/fixture.html" <<HTML
           );
           assertChildrenUnmutated("fixture");
 
-          legacyClickHeadingGutter(root.children[0]);
+          legacyClickHeadingLabel(root.children[0]);
           assert(
             !getOwnedStyle(container).textContent.includes("display: none"),
             "legacy click-only H1 gutter handler still unfolds H1"
           );
 
-          const labelGapOffset =
-            parseFloat(window.getComputedStyle(root.children[0], "::before").width) +
-            2;
-          clickHeadingGutter(root.children[0], labelGapOffset);
+          clickHeadingLabel(root.children[0], 8, document.body);
           assert(
             getOwnedStyle(container).textContent.includes(
               ":nth-child(n + 2):nth-child(-n + 8)"
             ),
-            "clicking label-marker gutter gap folds H1 content range"
+            "body-targeted H1 label click folds H1 content range"
           );
-          legacyClickHeadingGutter(root.children[0], labelGapOffset);
+          legacyClickHeadingLabel(root.children[0], 8, document.body);
           assert(
             !getOwnedStyle(container).textContent.includes("display: none"),
-            "label-marker gutter gap click-only handler unfolds H1"
+            "body-targeted H1 label click-only handler unfolds H1"
           );
 
-          const wideGutterOffset = Math.max(
-            42,
-            parseFloat(window.getComputedStyle(root.children[0]).paddingLeft) - 8
-          );
-          clickHeadingGutter(root.children[0], wideGutterOffset);
-          assert(
-            getOwnedStyle(container).textContent.includes(
-              ":nth-child(n + 2):nth-child(-n + 8)"
-            ),
-            "clicking wide heading label gutter folds H1 content range"
-          );
-          legacyClickHeadingGutter(root.children[0], wideGutterOffset);
+          const outsideLabelOffset =
+            parseFloat(window.getComputedStyle(root.children[0], "::before").width) +
+            8;
+          clickHeadingLabel(root.children[0], outsideLabelOffset);
           assert(
             !getOwnedStyle(container).textContent.includes("display: none"),
-            "wide heading label gutter click-only handler unfolds H1"
+            "clicking outside compact heading label does not fold"
           );
 
           toolbar
@@ -470,10 +516,8 @@ cat > "$tmp/fixture.html" <<HTML
             "fold to H2 folds first H2 section"
           );
           assert(
-            foldToH2Css.includes(
-              '--cursor-md-heading-fold-marker: "+"; --cursor-md-heading-fold-marker-opacity: 0.85'
-            ),
-            "collapsed headings keep visible plus marker"
+            !foldToH2Css.includes("--cursor-md-heading-fold-marker"),
+            "collapsed headings do not generate plus/minus markers"
           );
 
           toolbar
@@ -514,7 +558,7 @@ cat > "$tmp/fixture.html" <<HTML
             ),
             "fold all collapses top-level section when selection is clear"
           );
-          clickHeadingGutter(root.children[0]);
+          clickHeadingLabel(root.children[0]);
           assert(
             !getOwnedStyle(container).textContent.includes(
               ":nth-child(n + 2):nth-child(-n + 8)"
@@ -620,7 +664,7 @@ cat > "$tmp/fixture.html" <<HTML
             "empty heading has no fold marker rule"
           );
           const beforeEmptyClickCss = emptyStyle.textContent;
-          clickHeadingGutter(emptyRoot.children[2]);
+          clickHeadingLabel(emptyRoot.children[2]);
           assert(
             getOwnedStyle(emptyContainer).textContent === beforeEmptyClickCss,
             "clicking empty heading gutter does not fold"
@@ -661,7 +705,7 @@ cat > "$tmp/fixture.html" <<HTML
             "single-heading fixture receives heading level label"
           );
           const beforeSingleHeadingClickCss = singleHeadingStyle.textContent;
-          clickHeadingGutter(singleHeadingRoot.children[0]);
+          clickHeadingLabel(singleHeadingRoot.children[0]);
           assert(
             getOwnedStyle(singleHeadingContainer).textContent ===
               beforeSingleHeadingClickCss,
@@ -702,7 +746,7 @@ cat > "$tmp/fixture.html" <<HTML
           );
           assert(!sameTagRoot.contains(sameTagToolbar), "same-tag toolbar outside ProseMirror");
           assert(!sameTagRoot.contains(sameTagStyle), "same-tag style outside ProseMirror");
-          clickHeadingGutter(sameTagRoot.children[0]);
+          clickHeadingLabel(sameTagRoot.children[0]);
           assert(
             getOwnedStyle(sameTagContainer).textContent.includes(
               ":nth-child(n + 2):nth-child(-n + 8)"
@@ -729,6 +773,24 @@ cat > "$tmp/fixture.html" <<HTML
           );
           assert(!promotedRoot.contains(promotedToolbar), "promoted toolbar outside ProseMirror");
           assertChildrenUnmutated("promoted-toolbar-fixture");
+
+          const splitContainer = document.getElementById("split-heading-fixture");
+          const splitRoot = splitContainer.querySelector(".tiptap.ProseMirror");
+          const splitPane = document.getElementById("split-pane-fixture");
+          assert(
+            splitContainer.classList.contains("cursor-md-heading-folds-inset"),
+            "split preview uses inset heading gutter when external gutter would overflow"
+          );
+          assert(
+            splitRoot.children[0].getBoundingClientRect().left >=
+              splitPane.getBoundingClientRect().left,
+            "split heading gutter stays inside its pane"
+          );
+          assert(
+            parseFloat(window.getComputedStyle(splitRoot).paddingLeft) > 0,
+            "split preview reserves internal heading gutter width"
+          );
+          assertChildrenUnmutated("split-heading-fixture");
 
           const fallbackContainer = document.getElementById("fallback-fixture");
           const fallbackRoot =

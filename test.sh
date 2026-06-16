@@ -46,7 +46,7 @@ check "CSS has font-size variable" bash -c '
 check "JS has frontmatter marker" bash -c '
   grep -q -- "cursorMarkdownPreviewFrontmatter" "$1/preview/custom.js"
 ' _ "$SCRIPT_DIR"
-check "JS has heading fold marker" bash -c '
+check "JS has heading fold runtime" bash -c '
   grep -q -- "cursorMarkdownPreviewHeadingFolds" "$1/preview/custom.js"
 ' _ "$SCRIPT_DIR"
 check "CSS has heading fold toolbar" bash -c '

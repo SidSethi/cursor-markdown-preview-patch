@@ -319,16 +319,15 @@ The fold model is visual-only and session-local:
   document children.
 
 In the preview, headings show an always-visible left-gutter level label such as
-`H1`, `H2`, or `H3`. The label uses the heading's resolved level and inherits
-the heading's typography with reduced contrast, so it reads as structure rather
-than document content. It is positioned outside the normal text column, so
-heading text does not shift horizontally.
+`H1`, `H2`, or `H3`. The label uses the heading's resolved level with reduced
+contrast and a smaller font, so it reads as structure rather than document
+content. It is positioned outside the normal text column, so heading text does
+not shift horizontally.
 
-Headings with content also get a smaller fold marker in the same gutter. Hover a
-heading to reveal its `-` marker, then click the gutter to fold or unfold that
-section. Empty heading sections get the level label but no fold marker and do
-not participate in bulk fold actions. Collapsed non-empty headings keep their
-`+` marker visible as a lightweight indicator that hidden content exists.
+Click the level label itself to fold or unfold a heading section. There is no
+separate `+` or `-` fold marker; keeping the control label-only makes the gutter
+narrow enough for split editor columns. Empty heading sections get the level
+label but do not fold and do not participate in bulk fold actions.
 
 The injected toolbar supports:
 
@@ -409,7 +408,30 @@ Read-only historical notes:
 
 ## Verification and version support
 
-Current heading gutter label verification was run on 2026-06-03:
+Current label-only heading gutter verification was run on 2026-06-16:
+
+- `node --check preview/custom.js`: passed
+- `bash -n tests/heading-folding-browser-fixture.sh`: passed
+- `bash tests/heading-folding-browser-fixture.sh`: passed
+- `./test.sh`: 27 passed, 0 failed
+- Browser fixture coverage includes:
+  - smaller, vertically centered generated `H1`/`H2`/`H3` gutter labels
+  - no generated `+` or `-` fold marker
+  - direct label clicks fold even when the selection is inside section content
+  - body-targeted label click events still resolve to the correct heading
+  - clicks outside the compact label do not fold
+  - split preview panes use a compact inset gutter when an external gutter
+    would overflow the pane boundary
+- `./patch`: applied to the live Cursor app bundle after fixture verification
+- Live visual verification in Cursor's native editable preview confirmed:
+  - plus/minus markers were gone after a real window reload
+  - split-pane labels were narrower, vertically centered, and stayed inside
+    each pane
+  - real mouse clicks on an `H2` label folded and unfolded the section
+- Live backup from that apply:
+  `/Users/sidsethi/Library/Application Support/Cursor/workbench-patch-backups/cursor-app-20260616-155809/workbench.html`
+
+Historical heading gutter label verification was run on 2026-06-03:
 
 - `bash -n lib/cursor-patch-common.sh patch rollback ensure-patched install-auto-reapply verify-auto-reapply test.sh tests/heading-folding-browser-fixture.sh`: passed
 - `node --check preview/custom.js`: passed

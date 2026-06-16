@@ -20,6 +20,7 @@
       toolbarClass: "cursor-md-heading-fold-toolbar",
       styleClass: "cursor-md-heading-fold-style",
       hasFoldsClass: "cursor-md-has-heading-folds",
+      insetGutterClass: "cursor-md-heading-folds-inset",
       rootAttribute: "data-cursor-md-fold-root",
       toolbarForAttribute: "data-cursor-md-fold-toolbar-for",
       styleForAttribute: "data-cursor-md-fold-style-for",
@@ -38,6 +39,7 @@
   const {
     actionAttribute,
     hasFoldsClass,
+    insetGutterClass,
     levelAttribute,
     rootAttribute,
     styleClass,
@@ -50,6 +52,8 @@
   const foldStatesByContainer = new WeakMap();
   const containersByFoldRootId = new Map();
   const selectionSectionKeysByContainer = new Map();
+  const resizeObservedElementsByContainer = new WeakMap();
+  let resizeObserver = null;
   let nextFoldRootId = 1;
   let suppressNextHeadingClick = false;
 
@@ -205,6 +209,56 @@
   const getHeadingFoldToolbarReference = (container, toolbarHost) => {
     const renderHost = getRenderHost(container);
     return toolbarHost === renderHost ? container : renderHost;
+  };
+
+  const getHeadingFoldBoundary = (container) =>
+    getHeadingFoldToolbarHost(container) || getRenderHost(container);
+
+  const observeResizeElementsForContainer = (container) => {
+    if (!resizeObserver) {
+      return;
+    }
+
+    const elements = new Set(
+      [
+        getRenderHost(container),
+        getHeadingFoldToolbarHost(container),
+        getEditorRoot(container),
+      ].filter(Boolean)
+    );
+    const previousElements =
+      resizeObservedElementsByContainer.get(container) || new Set();
+
+    for (const element of previousElements) {
+      if (!elements.has(element)) {
+        resizeObserver.unobserve(element);
+      }
+    }
+
+    for (const element of elements) {
+      if (!previousElements.has(element)) {
+        resizeObserver.observe(element);
+      }
+    }
+
+    resizeObservedElementsByContainer.set(container, elements);
+  };
+
+  const unobserveResizeElementsForContainer = (container) => {
+    if (!resizeObserver) {
+      return;
+    }
+
+    const elements = resizeObservedElementsByContainer.get(container);
+    if (!elements) {
+      return;
+    }
+
+    for (const element of elements) {
+      resizeObserver.unobserve(element);
+    }
+
+    resizeObservedElementsByContainer.delete(container);
   };
 
   const getEditorRoot = (container) => {
@@ -639,6 +693,28 @@
       )
       .join("\n");
 
+  const updateHeadingFoldGutterMode = (container, sections) => {
+    const heading = sections[0]?.heading;
+    const editorRoot = getEditorRoot(container);
+    const boundary = getHeadingFoldBoundary(container);
+
+    if (!heading || !editorRoot || !boundary?.getBoundingClientRect) {
+      container.classList.remove(insetGutterClass);
+      return;
+    }
+
+    const editorRootRect = editorRoot.getBoundingClientRect?.();
+    const boundaryRect = boundary.getBoundingClientRect();
+    const gutterWidth =
+      parseFloat(window.getComputedStyle?.(heading)?.paddingLeft || "0") || 0;
+    const naturalGutterLeft = editorRootRect
+      ? editorRootRect.left - gutterWidth
+      : boundaryRect.left;
+    const shouldInsetGutter =
+      naturalGutterLeft < boundaryRect.left + 1;
+    container.classList.toggle(insetGutterClass, shouldInsetGutter);
+  };
+
   const findGeneratedElementInHost = (host, className, attribute, value) => {
     const elements = Array.from(host.children).filter(
       (child) =>
@@ -723,7 +799,9 @@
 
     selectionSectionKeysByContainer.delete(container);
     container.classList.remove(hasFoldsClass);
+    container.classList.remove(insetGutterClass);
     container.removeAttribute(rootAttribute);
+    unobserveResizeElementsForContainer(container);
     foldStatesByContainer.delete(container);
   };
 
@@ -742,16 +820,11 @@
 
     for (const section of sections) {
       const isCollapsed = state.collapsed.has(section.key);
-      const marker = isCollapsed ? "+" : "-";
-      const markerOpacity = isCollapsed ? "0.85" : "0";
-      const foldMarkerCss = section.hasContent
-        ? ` --cursor-md-heading-fold-marker: "${marker}"; --cursor-md-heading-fold-marker-opacity: ${markerOpacity};`
-        : "";
       lines.push(
         `${buildRuleSelector(
           rootSelectors,
           `> :nth-child(${section.headingChildNumber})`
-        )} { --cursor-md-heading-level-label: "H${section.level}";${foldMarkerCss} }`
+        )} { --cursor-md-heading-level-label: "H${section.level}"; }`
       );
 
       if (section.hasContent && isCollapsed) {
@@ -1027,6 +1100,8 @@
     container.classList.add(hasFoldsClass);
     container.setAttribute(rootAttribute, state.rootId);
     containersByFoldRootId.set(state.rootId, container);
+    observeResizeElementsForContainer(container);
+    updateHeadingFoldGutterMode(container, sections);
 
     if (foldableSections.length) {
       renderHeadingFoldToolbar(container, state);
@@ -1130,10 +1205,6 @@
     if (state.collapsed.has(section.key)) {
       state.collapsed.delete(section.key);
     } else {
-      if (selectionIntersectsSectionContent(container, section)) {
-        return;
-      }
-
       state.collapsed.add(section.key);
     }
 
@@ -1165,7 +1236,7 @@
     return true;
   };
 
-  const clickIsInHeadingGutter = (event, heading) => {
+  const clickIsInHeadingLabel = (event, heading) => {
     const rect = heading.getBoundingClientRect?.();
     if (!rect || event.clientX < rect.left || event.clientY < rect.top) {
       return false;
@@ -1175,13 +1246,13 @@
       return false;
     }
 
-    const paddingLeft =
-      parseFloat(window.getComputedStyle?.(heading)?.paddingLeft || "0") || 0;
-    const gutterWidth = Math.min(128, Math.max(18, paddingLeft));
-    return event.clientX <= rect.left + gutterWidth;
+    const labelStyle = window.getComputedStyle?.(heading, "::before");
+    const labelWidth = parseFloat(labelStyle?.width || "0") || 0;
+    const hitWidth = Math.min(64, Math.max(16, labelWidth));
+    return event.clientX <= rect.left + hitWidth;
   };
 
-  const findHeadingForGutterClickInContainer = (event, container) => {
+  const findHeadingForLabelClickInContainer = (event, container) => {
     const editorRoot = getEditorRoot(container);
     if (!container || !editorRoot) {
       return null;
@@ -1189,19 +1260,19 @@
 
     return (
       Array.from(editorRoot.children).find(
-        (child) => isHeading(child) && clickIsInHeadingGutter(event, child)
+        (child) => isHeading(child) && clickIsInHeadingLabel(event, child)
       ) || null
     );
   };
 
-  const findHeadingForGutterClick = (event) => {
+  const findHeadingForLabelClick = (event) => {
     const targetHeading = event.target?.closest?.(headingSelector);
-    if (targetHeading && clickIsInHeadingGutter(event, targetHeading)) {
+    if (targetHeading && clickIsInHeadingLabel(event, targetHeading)) {
       return targetHeading;
     }
 
     const targetContainer = getPreviewContainer(event.target);
-    const targetContainerHeading = findHeadingForGutterClickInContainer(
+    const targetContainerHeading = findHeadingForLabelClickInContainer(
       event,
       targetContainer
     );
@@ -1209,11 +1280,31 @@
       return targetContainerHeading;
     }
 
+    for (const container of getPreviewContainers()) {
+      if (container === targetContainer) {
+        continue;
+      }
+
+      const containerHeading = findHeadingForLabelClickInContainer(
+        event,
+        container
+      );
+      if (containerHeading) {
+        return containerHeading;
+      }
+    }
+
     return null;
   };
 
+  const consumeHeadingFoldEvent = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+  };
+
   const handleHeadingClick = (event) => {
-    const heading = findHeadingForGutterClick(event);
+    const heading = findHeadingForLabelClick(event);
     if (!heading) {
       return false;
     }
@@ -1224,14 +1315,13 @@
       return false;
     }
 
-    event.preventDefault();
-    event.stopPropagation();
+    consumeHeadingFoldEvent(event);
     toggleHeadingFold(container, heading);
     return true;
   };
 
   const handleHeadingMouseDown = (event) => {
-    const heading = findHeadingForGutterClick(event);
+    const heading = findHeadingForLabelClick(event);
     if (!heading) {
       return false;
     }
@@ -1242,8 +1332,7 @@
       return false;
     }
 
-    event.preventDefault();
-    event.stopPropagation();
+    consumeHeadingFoldEvent(event);
     suppressNextHeadingClick = true;
     toggleHeadingFold(container, heading);
     return true;
@@ -1349,6 +1438,10 @@
     scheduled = true;
     window.requestAnimationFrame(renderAll);
   };
+
+  if (typeof ResizeObserver === "function") {
+    resizeObserver = new ResizeObserver(scheduleRender);
+  }
 
   const observer = new MutationObserver(scheduleRender);
 
