@@ -28,6 +28,7 @@ check "rollback syntax" bash -n "$SCRIPT_DIR/rollback"
 check "ensure-patched syntax" bash -n "$SCRIPT_DIR/ensure-patched"
 check "install-auto-reapply syntax" bash -n "$SCRIPT_DIR/install-auto-reapply"
 check "verify-auto-reapply syntax" bash -n "$SCRIPT_DIR/verify-auto-reapply"
+check "README demo generator syntax" bash -n "$SCRIPT_DIR/docs/generate-readme-demo.sh"
 if command -v node >/dev/null 2>&1; then
   check "custom JS syntax" node --check "$SCRIPT_DIR/preview/custom.js"
 fi

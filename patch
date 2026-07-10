@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Patch script to apply custom CSS/JS to Cursor's editable rendered Markdown preview
+# Installer entrypoint for the customization payload under preview/.
 #
-# Works by injecting Cursor.app's workbench.html with a managed block
+# Injects the payload into Cursor.app's workbench.html as a managed block.
 
 set -euo pipefail
 

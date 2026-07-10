@@ -1,46 +1,80 @@
-# Cursor editable Markdown preview CSS/JS patch
+# Cursor Editable Markdown Preview Patch
 
-Cursor's native editable rendered Markdown preview does not currently allow custom styling, frontmatter rendering, or heading folding. This repo is a small unsupported workaround: it patches Cursor's installed app bundle, injects custom CSS into `workbench.html`, and installs a same-origin JavaScript renderer next to `workbench.html`.
+An unsupported macOS workaround for customizing Cursor's native, editable
+`Preview | Markdown` surface.
 
-It targets Cursor's private `.markdown-editor-react__richtext-content` DOM, which is used by the native `Preview | Markdown` editor surface. The current patch combines CSS typography/layout changes with JavaScript frontmatter detection so leading YAML frontmatter renders as a compact metadata table inspired by GitHub's Markdown preview, and normal Markdown headings can be visually folded from the editable preview.
+> [!WARNING]
+> This modifies Cursor's installed app bundle through a private DOM contract.
+> `./patch` creates a backup and `./rollback` restores it, but Cursor updates can
+> overwrite the patch and Cursor may show a corrupt-installation warning.
 
-## Why this matters
+## 30-second overview
 
-Cursor's native `Preview | Markdown` mode is the only editable rendered Markdown preview I have found in Cursor so far, but it does not currently offer a supported API for custom styling or frontmatter-specific behavior.
+This repo has two deliberately separate concerns:
 
-Other options like Cursor's VS Code-style `Markdown: Open Preview` and popular extensions like `Markdown Preview Enhanced` offer custom styling, but not inline editing - they both require you to edit the file in the raw editor and view rendered Markdown in a separate window.
+| Component | Where | Responsibility |
+| --- | --- | --- |
+| **Installer and lifecycle** | Root commands, `lib/`, `auto-reapply/` | Back up Cursor's workbench, inject the payload, verify it, roll it back, and optionally reapply it after updates. |
+| **Preview customization** | [`preview/`](./preview/) | The opinionated CSS and JavaScript that define how the editable Markdown preview looks and behaves. |
 
-See [Surfaces tested](#surfaces-tested) for details.
+`./patch` is the bridge: it installs `preview/custom.css` and
+`preview/custom.js` into Cursor's private workbench surface. The boundary is
+useful and intentional, but lightweight—the installer is not a general Cursor
+extension framework.
 
-## Usage
+![Default Cursor editable Markdown preview beside the customized preview, followed by Fold to H2 and direct heading-fold interactions.](./docs/assets/preview-demo.gif)
 
-Use the repo checkout as-is, then run:
+The demo runs this repo's real `preview/custom.css` and `preview/custom.js` in a
+Cursor-shaped fixture; the frontmatter and folding behavior are not mocked.
+
+## What the customization adds
+
+- Focused typography and a readable document width while preserving inline
+  editing.
+- A compact table for leading YAML frontmatter.
+- Always-visible `H1`–`H6` gutter labels that fold individual sections.
+- Toolbar actions such as `Fold all`, `Fold to current`, and `Fold to H2`.
+
+## Quick start
 
 ```bash
-chmod +x patch rollback ensure-patched install-auto-reapply verify-auto-reapply
+git clone https://github.com/SidSethi/cursor-markdown-preview-patch.git
+cd cursor-markdown-preview-patch
 ./patch
 ```
 
-On Sid's dotfiles-managed machines, prefer the stable wrapper:
+Reload Cursor with `Developer: Reload Window` or restart it. To undo the change:
 
 ```bash
-cursor-inline-markdown-preview-patch
+./rollback
 ```
 
-To see changes, reload Cursor with `Developer: Reload Window` or restart Cursor.
-
-By default, the script sets the preview base font size to match Cursor's current
-`editor.fontSize`. Edit `preview/custom.css` for styling changes, edit
-`preview/custom.js` for frontmatter or heading-folding behavior changes, then
-re-run `./patch` and reload Cursor.
-
-You can choose how the font-size variable is rendered:
+To make the preview your own, edit `preview/custom.css` for presentation or
+`preview/custom.js` for behavior, rerun `./patch`, and reload Cursor. By default,
+the patch matches Cursor's current `editor.fontSize`; override that snapshot if
+needed:
 
 ```bash
 ./patch --font-size editor # default: use Cursor editor.fontSize
-./patch --font-size css    # use the value already written in preview/custom.css
+./patch --font-size css    # use the value in preview/custom.css
 ./patch --font-size 18     # inject 18px
 ```
+
+On Sid's dotfiles-managed machines, the stable wrappers are
+`cursor-inline-markdown-preview-patch` and
+`cursor-inline-markdown-preview-rollback`.
+
+## Why this exists
+
+Cursor's native `Preview | Markdown` mode is the only editable rendered
+Markdown preview I have found in Cursor so far, but it does not currently offer
+a supported API for custom styling or frontmatter-specific behavior.
+
+Cursor's VS Code-style `Markdown: Open Preview` and extensions such as Markdown
+Preview Enhanced support custom styling, but not this inline-editing workflow:
+the raw editor and rendered preview remain separate surfaces.
+
+See [Surfaces tested](#surfaces-tested) for details.
 
 ## Auto-reapply after Cursor updates
 
@@ -162,20 +196,25 @@ On Sid's dotfiles-managed machines, prefer the stable rollback wrapper:
 cursor-inline-markdown-preview-rollback
 ```
 
-## Architecture
+## The two components
 
-The repo has four small subsystems:
+### 1. Installer and lifecycle
 
-- Root scripts are the public command surface: `patch`, `rollback`,
-  `ensure-patched`, `install-auto-reapply`, `verify-auto-reapply`, and
-  `test.sh`.
-- `preview/` is the injected preview customization/runtime. These files define
-  the CSS and JavaScript behavior installed into Cursor's workbench.
-- `lib/` is shared patch-system mechanics: constants, workbench discovery,
-  managed asset paths, Trusted Types policy checks, and patch-present
-  verification.
-- `auto-reapply/` contains macOS support assets used by the root auto-reapply
-  commands.
+- `patch`, `rollback`, `ensure-patched`, `install-auto-reapply`, and
+  `verify-auto-reapply` are the public command surface.
+- `lib/` contains shared app-bundle discovery, injection, verification, and
+  backup mechanics.
+- `auto-reapply/` contains the macOS runner and LaunchAgent support assets.
+
+### 2. Preview customization
+
+- `preview/custom.css` defines the installed presentation.
+- `preview/custom.js` defines frontmatter rendering and visual heading folding.
+- [`preview/README.md`](./preview/README.md) documents this payload boundary for
+  anyone who wants to replace or extend the customization.
+
+`docs/`, `tests/`, and `test.sh` support those two components; they are not a
+third runtime component.
 
 ## Files
 
@@ -212,13 +251,16 @@ The repo has four small subsystems:
   - CSS source for Cursor's editable rendered Markdown preview, rendered frontmatter table, and heading-folding controls.
 - `preview/custom.js`
   - JavaScript source that recognizes leading YAML frontmatter in Cursor's rendered Markdown DOM, replaces the raw render with a compact metadata table, and adds visual heading folding in the editable Markdown preview.
+- `preview/README.md`
+  - Short guide to the customization payload and its boundary with the patcher.
 - `auto-reapply/runner/`
   - Swift source for the local app that runs `ensure-patched`.
 - `auto-reapply/launchd/`
   - Example app-backed per-user LaunchAgent plist for macOS auto-reapply.
 - `docs/`
-  - Auto-reapply runbook, live heading-folding test note, heading gutter label
-    mockup, and historical archive notes.
+  - README demo fixture and generator, auto-reapply runbook, live
+    heading-folding test note, heading gutter label mockup, and historical
+    archive notes.
 - `tests/`
   - Browser fixture coverage for the injected frontmatter and heading-folding
     runtime.
